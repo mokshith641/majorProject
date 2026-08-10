@@ -1,0 +1,33 @@
+# IDEs and Editors
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+Thumbs.db
+
+# Local configuration files
+.env
+.env.local
+.env.*.local
+
+# Python/Node dependencies & build output (ignored in subdirs too, but good to have)
+node_modules/
+dist/
+build/
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Local databases and runtime data
+*.db
+*.sqlite3
+backend/app/data/
+backend/whisper_models/
+backend/recordings/
+backend/reports/
+backend/temp/
