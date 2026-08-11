@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { useAuth } from '../contexts/AuthContext';
 import { PATHS } from '../routes/paths';
@@ -15,9 +15,13 @@ interface RegisterFormInputs {
 export const Register: React.FC = () => {
   const { registerUser } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Preserve navigation path
+  const from = (location.state as any)?.from;
 
   const {
     register,
@@ -36,7 +40,7 @@ export const Register: React.FC = () => {
       await registerUser(data.email, data.password, data.name, data.role);
       setSuccess(true);
       setTimeout(() => {
-        navigate(PATHS.LOGIN);
+        navigate(PATHS.LOGIN, { state: { from } });
       }, 2500);
     } catch (e: any) {
       console.error(e);
@@ -160,7 +164,7 @@ export const Register: React.FC = () => {
 
       <div className="mt-8 text-center text-sm text-slate-400">
         Already have an account?{' '}
-        <Link to={PATHS.LOGIN} className="text-indigo-400 hover:text-indigo-300 font-medium transition-colors">
+        <Link to={PATHS.LOGIN} state={{ from }} className="text-indigo-400 hover:text-indigo-300 font-medium transition-colors">
           Sign In
         </Link>
       </div>

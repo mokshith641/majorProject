@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
+import { PATHS } from '../routes/paths';
 import {
   Square,
   Clock,
@@ -10,14 +12,19 @@ import {
   MousePointerClick,
   Keyboard,
   Brain,
-  AlertCircle
+  AlertCircle,
+  Share2,
+  Copy,
+  Check
 } from 'lucide-react';
 
 export const LiveMeeting: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   
   const [meetingTitle, setMeetingTitle] = useState('Active Meeting Session');
+  const [hostId, setHostId] = useState<number | null>(null);
   const [secondsElapsed, setSecondsElapsed] = useState(0);
   const [localClicks, setLocalClicks] = useState(0);
   const [localKeys, setLocalKeys] = useState(0);
@@ -27,16 +34,41 @@ export const LiveMeeting: React.FC = () => {
     "System: Telemetry tracking established.",
     "System: Audio buffer stream listening active."
   ]);
+
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(false);
   
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
+
+  const isHost = user && hostId ? user.id === hostId : true;
+
+  const handleCopyLink = () => {
+    const link = `${window.location.origin}/meetings/${id}/live`;
+    navigator.clipboard.writeText(link);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2000);
+  };
+
+  const handleCopyCode = () => {
+    navigator.clipboard.writeText(id || '');
+    setCopiedCode(true);
+    setTimeout(() => setCopiedCode(false), 2000);
+  };
 
   // 1. Fetch meeting title and setup local webcam
   useEffect(() => {
     const fetchMeeting = async () => {
       try {
+        // Automatically register participant/join session in backend
+        await api.post(`/meetings/${id}/join`);
+      } catch (e) {
+        console.warn("Could not join meeting as participant:", e);
+      }
+      try {
         const res = await api.get(`/meetings/${id}`);
         setMeetingTitle(res.data.title);
+        setHostId(res.data.host_id);
       } catch (e) {
         console.error("Could not fetch meeting name", e);
       }
@@ -53,7 +85,61 @@ export const LiveMeeting: React.FC = () => {
           setStreamActive(true);
         }
       } catch (err) {
-        console.warn("Webcam access denied. Face tracking fallback to default state.", err);
+        console.warn("Webcam access denied. Using simulated placeholder video stream.", err);
+        // Create canvas to generate a mock video stream
+        const canvas = document.createElement('canvas');
+        canvas.width = 320;
+        canvas.height = 240;
+        const ctx = canvas.getContext('2d');
+        
+        let angle = 0;
+        const intervalId = setInterval(() => {
+          if (!ctx) return;
+          // Draw a modern mock camera background (gradient)
+          const grad = ctx.createRadialGradient(160, 120, 10, 160, 120, 180);
+          grad.addColorStop(0, '#1e1b4b');
+          grad.addColorStop(1, '#090d16');
+          ctx.fillStyle = grad;
+          ctx.fillRect(0, 0, 320, 240);
+          
+          // Draw user avatar placeholder circle
+          ctx.beginPath();
+          ctx.arc(160, 110, 45, 0, Math.PI * 2);
+          ctx.fillStyle = '#312e81';
+          ctx.fill();
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = '#4f46e5';
+          ctx.stroke();
+          
+          // Draw avatar body arc
+          ctx.beginPath();
+          ctx.arc(160, 200, 60, Math.PI, 0);
+          ctx.fillStyle = '#312e81';
+          ctx.fill();
+          ctx.stroke();
+          
+          // Draw a pulsing "Active Simulation" dot
+          ctx.beginPath();
+          const radius = 6 + Math.abs(Math.sin(angle)) * 3;
+          ctx.arc(30, 30, radius, 0, Math.PI * 2);
+          ctx.fillStyle = '#22c55e'; // Green dot
+          ctx.fill();
+          
+          // Draw "CAMERA SIMULATION" text
+          ctx.fillStyle = '#94a3b8';
+          ctx.font = 'bold 10px sans-serif';
+          ctx.fillText('CAMERA SIMULATION', 50, 34);
+          
+          angle += 0.1;
+        }, 100);
+
+        const simulatedStream = (canvas as any).captureStream ? (canvas as any).captureStream(10) : null;
+        if (simulatedStream && videoRef.current) {
+          videoRef.current.srcObject = simulatedStream;
+          mediaStreamRef.current = simulatedStream;
+          (simulatedStream as any)._simIntervalId = intervalId;
+          setStreamActive(true);
+        }
       }
     };
     startCam();
@@ -62,6 +148,9 @@ export const LiveMeeting: React.FC = () => {
       // Cleanup: stop video stream
       if (mediaStreamRef.current) {
         mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+        if ((mediaStreamRef.current as any)._simIntervalId) {
+          clearInterval((mediaStreamRef.current as any)._simIntervalId);
+        }
       }
     };
   }, [id]);
@@ -135,6 +224,48 @@ export const LiveMeeting: React.FC = () => {
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
+      {/* Page Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2">
+        <div>
+          <h2 className="text-2xl font-bold text-white tracking-tight">{meetingTitle}</h2>
+          <p className="text-xs text-slate-500 mt-1 uppercase font-semibold tracking-wider">
+            {isHost ? "Host View" : "Participant View"}
+          </p>
+        </div>
+        
+        {/* Share Invite Widget */}
+        <div className="flex flex-wrap items-center gap-3 bg-slate-900/60 border border-slate-800/85 px-4 py-2 rounded-xl shadow-lg">
+          <div className="flex items-center gap-1.5 border-r border-slate-800 pr-3">
+            <span className="text-xs text-slate-500 font-medium">Code:</span>
+            <span className="text-sm font-bold text-indigo-400 font-mono">{id}</span>
+            <button
+              onClick={handleCopyCode}
+              title="Copy Code"
+              className="p-1 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded transition-all ml-1 cursor-pointer"
+            >
+              {copiedCode ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+            </button>
+          </div>
+          
+          <button
+            onClick={handleCopyLink}
+            className="flex items-center gap-1.5 text-xs text-indigo-300 hover:text-white bg-indigo-600/10 hover:bg-indigo-600 border border-indigo-500/20 hover:border-indigo-500 px-3 py-1.5 rounded-lg font-semibold shadow-xs hover:shadow-indigo-600/10 transition-all cursor-pointer"
+          >
+            {copiedLink ? (
+              <>
+                <Check className="h-3.5 w-3.5 text-emerald-400" />
+                Copied Link!
+              </>
+            ) : (
+              <>
+                <Share2 className="h-3.5 w-3.5" />
+                Share Invite Link
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
       {/* Live Warning Status Bar */}
       <div className="flex flex-wrap items-center justify-between gap-4 bg-red-500/10 border border-red-500/20 px-6 py-4 rounded-xl">
         <div className="flex items-center gap-3">
@@ -237,14 +368,24 @@ export const LiveMeeting: React.FC = () => {
           </div>
 
           <div className="mt-4 pt-4 border-t border-slate-800/80 flex justify-end">
-            <button
-              onClick={handleEndMeeting}
-              disabled={isEnding}
-              className="flex items-center gap-2 bg-red-600 hover:bg-red-500 disabled:bg-red-800/50 text-white font-semibold px-6 py-3 rounded-lg shadow-lg hover:shadow-red-600/10 transition-all text-sm"
-            >
-              <Square className="h-4 w-4" />
-              {isEnding ? 'Generating Reports & Summaries...' : 'End Meeting'}
-            </button>
+            {isHost ? (
+              <button
+                onClick={handleEndMeeting}
+                disabled={isEnding}
+                className="flex items-center gap-2 bg-red-600 hover:bg-red-500 disabled:bg-red-800/50 text-white font-semibold px-6 py-3 rounded-lg shadow-lg hover:shadow-red-600/10 transition-all text-sm cursor-pointer"
+              >
+                <Square className="h-4 w-4" />
+                {isEnding ? 'Generating Reports & Summaries...' : 'End Meeting'}
+              </button>
+            ) : (
+              <button
+                onClick={() => navigate(PATHS.DASHBOARD)}
+                className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white font-semibold px-6 py-3 rounded-lg shadow-md hover:shadow-slate-800/10 transition-all text-sm cursor-pointer"
+              >
+                <AlertCircle className="h-4 w-4 rotate-180 text-amber-400" />
+                Leave Session
+              </button>
+            )}
           </div>
         </div>
       </div>

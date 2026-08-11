@@ -35,6 +35,13 @@ class Settings(BaseSettings):
         extra="ignore"
     )
 
+    @validator("DATABASE_URL", pre=True)
+    def format_database_url(cls, v: str) -> str:
+        """Handle PostgreSQL URL dialect prefix compatibility (postgres:// to postgresql://)."""
+        if v and v.startswith("postgres://"):
+            return v.replace("postgres://", "postgresql://", 1)
+        return v
+
     @validator("UPLOAD_DIR", "REPORTS_DIR", pre=True)
     def ensure_directories_exist(cls, v: str) -> str:
         """Create target directories if they do not exist."""

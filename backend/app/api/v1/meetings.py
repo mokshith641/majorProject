@@ -88,10 +88,54 @@ def read_meeting(
     current_user: User = Depends(deps.get_current_active_user),
 ) -> Any:
     """Fetch detail specifications of a specific meeting."""
-    meeting = db.query(Meeting).filter(Meeting.id == id, Meeting.host_id == current_user.id).first()
+    meeting = db.query(Meeting).filter(Meeting.id == id).first()
     if not meeting:
         raise HTTPException(status_code=404, detail="Meeting not found")
+    
+    if meeting.host_id != current_user.id:
+        # Check if participant
+        participant = db.query(Participant).filter(
+            Participant.meeting_id == id, Participant.email == current_user.email
+        ).first()
+        if not participant:
+            raise HTTPException(status_code=403, detail="You do not have permission to access this meeting.")
+            
     return meeting
+
+
+@router.post("/{id}/join", response_model=MeetingResponse)
+def join_meeting(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+) -> Any:
+    """Join an active/scheduled meeting as a participant."""
+    meeting = db.query(Meeting).filter(Meeting.id == id).first()
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    
+    # Check if user is already the host or a participant
+    is_host = meeting.host_id == current_user.id
+    existing_participant = (
+        db.query(Participant)
+        .filter(Participant.meeting_id == id, Participant.email == current_user.email)
+        .first()
+    )
+    
+    if not is_host and not existing_participant:
+        # Create a new participant entry for the current user
+        new_participant = Participant(
+            meeting_id=meeting.id,
+            email=current_user.email,
+            name=current_user.full_name or current_user.email.split("@")[0],
+            join_time=datetime.utcnow()
+        )
+        db.add(new_participant)
+        db.commit()
+        db.refresh(meeting)
+        
+    return meeting
+
 
 
 @router.post("/{id}/start")

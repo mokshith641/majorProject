@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import { PATHS } from '../routes/paths';
 import {
@@ -12,7 +12,8 @@ import {
   TrendingUp,
   BrainCircuit,
   Eye,
-  MousePointerClick
+  MousePointerClick,
+  LogIn
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -61,9 +62,15 @@ interface MeetingSummary {
 }
 
 export const Dashboard: React.FC = () => {
+  const navigate = useNavigate();
   const [analytics, setAnalytics] = useState<DashboardAnalytics | null>(null);
   const [recentMeetings, setRecentMeetings] = useState<MeetingSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Join meeting states
+  const [meetingCode, setMeetingCode] = useState('');
+  const [isJoining, setIsJoining] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -82,6 +89,25 @@ export const Dashboard: React.FC = () => {
     };
     fetchDashboardData();
   }, []);
+
+  const handleJoinMeeting = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!meetingCode.trim()) return;
+
+    setIsJoining(true);
+    setJoinError(null);
+    try {
+      // Call join endpoint in backend
+      await api.post(`/meetings/${meetingCode.trim()}/join`);
+      // Redirect to the live meeting
+      navigate(`/meetings/${meetingCode.trim()}/live`);
+    } catch (err: any) {
+      console.error(err);
+      setJoinError(err.response?.data?.detail || 'Failed to join meeting. Please verify the code.');
+    } finally {
+      setIsJoining(false);
+    }
+  };
 
   const COLORS = ['#6366F1', '#8B5CF6', '#EC4899', '#3B82F6'];
 
@@ -103,18 +129,50 @@ export const Dashboard: React.FC = () => {
   return (
     <div className="space-y-8 max-w-7xl mx-auto">
       {/* 1. Header welcome */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-white">Dashboard Overview</h2>
           <p className="text-slate-400 text-sm">Welcome back! Review your productivity trends.</p>
+          {joinError && (
+            <p className="text-rose-400 text-xs mt-1.5 bg-rose-500/10 border border-rose-500/20 px-2.5 py-1 rounded inline-block">
+              {joinError}
+            </p>
+          )}
         </div>
-        <Link
-          to={PATHS.CREATE_MEETING}
-          className="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-4 py-2.5 rounded-lg shadow-lg hover:shadow-indigo-600/20 transition-all text-sm self-start"
-        >
-          <Video className="h-4 w-4" />
-          Start Smart Session
-        </Link>
+        
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Join Session Form */}
+          <form onSubmit={handleJoinMeeting} className="flex items-center gap-2 bg-slate-950 border border-slate-800 p-1.5 rounded-lg focus-within:border-indigo-500/50 transition-all">
+            <input
+              type="text"
+              placeholder="Enter meeting code (e.g. 1)"
+              value={meetingCode}
+              onChange={(e) => setMeetingCode(e.target.value)}
+              className="bg-transparent text-sm text-white px-2.5 py-1 focus:outline-hidden w-48 placeholder:text-slate-500"
+              disabled={isJoining}
+            />
+            <button
+              type="submit"
+              disabled={isJoining || !meetingCode.trim()}
+              className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 text-white text-xs font-semibold px-4 py-2 rounded-md transition-all cursor-pointer"
+            >
+              {isJoining ? (
+                <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
+              ) : (
+                <LogIn className="h-3.5 w-3.5" />
+              )}
+              Join
+            </button>
+          </form>
+
+          <Link
+            to={PATHS.CREATE_MEETING}
+            className="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-4 py-2.5 rounded-lg shadow-lg hover:shadow-indigo-600/20 transition-all text-sm self-start"
+          >
+            <Video className="h-4 w-4" />
+            Start Smart Session
+          </Link>
+        </div>
       </div>
 
       {/* 2. Metrics Cards Row */}
