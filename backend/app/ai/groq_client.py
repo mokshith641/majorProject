@@ -5,6 +5,7 @@ from typing import Dict, List, Optional
 
 import torch
 from transformers import T5ForConditionalGeneration, T5Tokenizer
+from groq import Groq
 
 from app.core.config import settings
 
@@ -135,6 +136,70 @@ class GroqIntelligenceClient:
         return self
 
     def generate_summary(self, transcript: str) -> Dict[str, any]:
+        if not transcript or not transcript.strip():
+            return {
+                "key_points": "No discussion recorded.",
+                "decisions": "No decisions captured.",
+                "risks": "None identified.",
+                "next_steps": "No actions scheduled.",
+                "action_items": []
+            }
+
+        # Check if Groq API is enabled
+        if settings.GROQ_API_KEY:
+            logger.info("Generating high-quality summary via Groq Cloud API...")
+            try:
+                if self._client is None:
+                    self._client = Groq(api_key=settings.GROQ_API_KEY)
+                
+                system_prompt = (
+                    "You are an expert AI meeting assistant. You are given a meeting transcript.\n"
+                    "Generate a structured JSON summary of the meeting. The output MUST be a valid JSON object matching the following structure:\n"
+                    "{\n"
+                    "  \"key_points\": \"- Bullet point 1\\n- Bullet point 2...\",\n"
+                    "  \"decisions\": \"1. Decision 1\\n2. Decision 2...\",\n"
+                    "  \"risks\": \"- Risk/concern 1\\n- Risk/concern 2...\",\n"
+                    "  \"next_steps\": \"- Next step 1\\n- Next step 2...\",\n"
+                    "  \"action_items\": [\n"
+                    "    {\n"
+                    "      \"task\": \"Clean task description\",\n"
+                    "      \"assignee\": \"Person name or TBD\",\n"
+                    "      \"due_date\": \"Due date/timeframe (e.g. 'Next Friday', '2026-08-15', or 'TBD')\",\n"
+                    "      \"status\": \"pending\"\n"
+                    "    }\n"
+                    "  ]\n"
+                    "}\n"
+                    "Return ONLY the raw JSON object. Do not include markdown code block syntax."
+                )
+
+                for model_name in ["llama-3.3-70b-specdec", "llama-3.1-8b-instant", "llama3-8b-8192"]:
+                    try:
+                        completion = self._client.chat.completions.create(
+                            messages=[
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": f"Transcript:\n{transcript}"}
+                            ],
+                            model=model_name,
+                            response_format={"type": "json_object"},
+                            temperature=0.2
+                        )
+                        res_text = completion.choices[0].message.content
+                        res_json = json.loads(res_text)
+                        
+                        # Validate structure has required keys
+                        required_keys = ["key_points", "decisions", "risks", "next_steps", "action_items"]
+                        if all(k in res_json for k in required_keys):
+                            return res_json
+                    except Exception as e:
+                        logger.warning(f"Failed using model {model_name} for summary: {e}. Retrying fallback...")
+                        continue
+            except Exception as e:
+                logger.error(f"Error calling Groq API for summary: {e}. Falling back to local summarizer.")
+
+        # Fallback to local offline summarizer
+        return self._generate_local_summary(transcript)
+
+    def _generate_local_summary(self, transcript: str) -> Dict[str, any]:
         """
         Extracts summary components from a meeting transcript offline:
         - Key points (using T5 chunk-wise summarization)
@@ -356,6 +421,49 @@ class GroqIntelligenceClient:
         }
 
     def answer_transcript_question(self, query: str, context_transcripts: List[Dict]) -> str:
+        if not context_transcripts:
+            return "I couldn't find any historical transcripts relevant to your request."
+
+        if settings.GROQ_API_KEY:
+            logger.info("Answering transcript query via Groq Cloud API...")
+            try:
+                if self._client is None:
+                    self._client = Groq(api_key=settings.GROQ_API_KEY)
+                
+                # Format context meetings
+                context_str = ""
+                for idx, item in enumerate(context_transcripts):
+                    context_str += f"Meeting #{idx+1}: {item.get('title')} ({item.get('date')})\n"
+                    context_str += f"Transcript Context Excerpts:\n{item.get('transcript')}\n"
+                    context_str += "---\n"
+                
+                system_prompt = (
+                    "You are a helpful AI Meeting Assistant. You are asked a question about a user's meeting history.\n"
+                    "You will be given context transcripts. Use them to answer the user's query as accurately and professionally as possible.\n"
+                    "Cite the specific meeting titles and dates in your response. Keep the response concise, formatted in clean markdown."
+                )
+
+                for model_name in ["llama-3.3-70b-specdec", "llama-3.1-8b-instant", "llama3-8b-8192"]:
+                    try:
+                        completion = self._client.chat.completions.create(
+                            messages=[
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": f"Context Transcripts:\n{context_str}\n\nQuestion: {query}"}
+                            ],
+                            model=model_name,
+                            temperature=0.3
+                        )
+                        return completion.choices[0].message.content
+                    except Exception as e:
+                        logger.warning(f"Failed using model {model_name} for query: {e}. Retrying fallback...")
+                        continue
+            except Exception as e:
+                logger.error(f"Error calling Groq API for query: {e}. Falling back to local offline search.")
+
+        # Fallback to local offline search
+        return self._answer_local_transcript_question(query, context_transcripts)
+
+    def _answer_local_transcript_question(self, query: str, context_transcripts: List[Dict]) -> str:
         """
         Answers search queries offline by performing TF-IDF relevance scoring across context transcripts,
         and returns clean excerpts cited by meeting title and date.
