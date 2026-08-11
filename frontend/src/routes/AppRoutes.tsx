@@ -21,6 +21,7 @@ import { MeetingHistory } from '../pages/MeetingHistory';
 import { Analytics } from '../pages/Analytics';
 import { Settings } from '../pages/Settings';
 import { UserProfile } from '../pages/UserProfile';
+import { SearchAssistant } from '../pages/SearchAssistant';
 import { AdminDashboard } from '../pages/AdminDashboard';
 import { NotFound } from '../pages/NotFound';
 
@@ -52,6 +53,7 @@ export const AppRoutes: React.FC = () => {
         <Route path={PATHS.ANALYTICS} element={<Analytics />} />
         <Route path={PATHS.SETTINGS} element={<Settings />} />
         <Route path={PATHS.PROFILE} element={<UserProfile />} />
+        <Route path={PATHS.SEARCH} element={<SearchAssistant />} />
         
         {/* Reports route fallback/links redirecting to History archive */}
         <Route path="/reports" element={<Navigate to={PATHS.MEETING_HISTORY} replace />} />

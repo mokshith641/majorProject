@@ -294,15 +294,14 @@ export const LiveMeeting: React.FC = () => {
               Webcam preview
             </h4>
             <div className="relative w-full aspect-video bg-[#090D16] rounded-lg overflow-hidden border border-slate-800 flex items-center justify-center">
-              {streamActive ? (
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="w-full h-full object-cover scale-x-[-1]"
-                />
-              ) : (
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className={`w-full h-full object-cover scale-x-[-1] ${streamActive ? 'block' : 'hidden'}`}
+              />
+              {!streamActive && (
                 <div className="text-center p-4">
                   <div className="h-10 w-10 bg-slate-800/80 rounded-full flex items-center justify-center mx-auto mb-2 text-slate-400">
                     X
