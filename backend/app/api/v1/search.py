@@ -8,7 +8,7 @@ from app.database.session import get_db
 from app.models.user import User
 from app.models.meeting import Meeting
 from app.models.transcription import Transcript
-from app.ai.groq_client import ai_client
+from app.ai.ai_client import ai_client
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

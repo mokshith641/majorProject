@@ -17,7 +17,7 @@ from app.models.report import Report
 from app.schemas.meeting import MeetingCreate, MeetingResponse
 from app.recording.audio_recorder import LocalAudioRecorder
 from app.transcription.whisper_runner import transcriber
-from app.ai.groq_client import ai_client
+from app.ai.ai_client import ai_client
 from app.reports.pdf_generator import generate_meeting_pdf
 from app.monitoring.input_monitor import activity_tracker
 from app.monitoring.vision_monitor import vision_monitor

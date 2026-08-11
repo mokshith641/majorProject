@@ -7,7 +7,7 @@ from app.core.config import settings as app_settings
 from app.database.session import get_db
 from app.models.user import User
 from app.models.settings import UserSettings
-from app.ai.groq_client import ai_client
+from app.ai.ai_client import ai_client
 
 router = APIRouter()
 

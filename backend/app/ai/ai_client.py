@@ -91,25 +91,25 @@ def clean_task_description(text: str) -> str:
     return text
 
 
-class GroqIntelligenceClient:
+class LocalIntelligenceClient:
     """
-    Manages AI completions entirely offline using T5-Small summarization and rule-based NLP extraction.
-    Does not make any external API calls, ensuring full offline availability and compatibility.
+    Manages AI completions using local T5-Base summarization and rule-based NLP extraction,
+    with an optional Groq Cloud API fallback integration if key is provided.
     """
     
     def __init__(self):
         self.api_key = settings.GROQ_API_KEY
         self._client = None
-        self.model = "offline-nlp-t5-small"
+        self.model = "offline-nlp-t5-base"
         self._tokenizer = None
         self._t5_model = None
 
     def _get_t5(self):
         if self._tokenizer is None or self._t5_model is None:
-            logger.info("Initializing offline T5-small model and tokenizer...")
-            self._tokenizer = T5Tokenizer.from_pretrained("t5-small")
-            self._t5_model = T5ForConditionalGeneration.from_pretrained("t5-small")
-            logger.info("T5-small initialized successfully.")
+            logger.info("Initializing offline T5-base model and tokenizer...")
+            self._tokenizer = T5Tokenizer.from_pretrained("t5-base")
+            self._t5_model = T5ForConditionalGeneration.from_pretrained("t5-base")
+            logger.info("T5-base initialized successfully.")
         return self._tokenizer, self._t5_model
 
     def _run_t5_summary(self, text: str, max_length: int = 150) -> str:
@@ -127,7 +127,7 @@ class GroqIntelligenceClient:
             )
             return tokenizer.decode(outputs[0], skip_special_tokens=True)
         except Exception as e:
-            logger.error(f"Error running T5-small summarization: {e}")
+            logger.error(f"Error running T5-base summarization: {e}")
             return text[:max_length]
 
     @property
@@ -145,7 +145,7 @@ class GroqIntelligenceClient:
                 "action_items": []
             }
 
-        # Check if Groq API is enabled
+        # Check if Groq API is enabled and user explicitly wants to use it
         if settings.GROQ_API_KEY:
             logger.info("Generating high-quality summary via Groq Cloud API...")
             try:
@@ -548,4 +548,4 @@ class GroqIntelligenceClient:
 
 
 # Global AI Orchestration client
-ai_client = GroqIntelligenceClient()
+ai_client = LocalIntelligenceClient()
