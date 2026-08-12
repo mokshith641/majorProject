@@ -46,7 +46,6 @@ def extract_voice_print(audio_data: np.ndarray, sample_rate: int) -> np.ndarray:
     """
     Computes a 10-dimensional Mel-spaced spectral energy voice print from audio data.
     """
-    # Requires at least 512 samples for a meaningful FFT
     if len(audio_data) < 512:
         return np.zeros(10, dtype=np.float32)
         
@@ -83,6 +82,43 @@ def extract_voice_print(audio_data: np.ndarray, sample_rate: int) -> np.ndarray:
         features = np.zeros(10, dtype=np.float32)
         
     return features
+
+
+def compute_silhouette_score(X: np.ndarray, labels: np.ndarray) -> float:
+    """
+    Computes the mean Silhouette Coefficient for the dataset X clustered into labels.
+    """
+    n = len(X)
+    if n <= 1:
+        return 0.0
+        
+    unique_labels = np.unique(labels)
+    if len(unique_labels) <= 1:
+        return 0.0
+        
+    silhouettes = []
+    for i in range(n):
+        c_idx = labels[i]
+        same_cluster = X[labels == c_idx]
+        if len(same_cluster) > 1:
+            a_i = np.mean(np.linalg.norm(same_cluster - X[i], axis=1))
+        else:
+            a_i = 0.0
+            
+        b_i = float('inf')
+        for other_c in unique_labels:
+            if other_c == c_idx:
+                continue
+            other_cluster = X[labels == other_c]
+            dist_to_other = np.mean(np.linalg.norm(other_cluster - X[i], axis=1))
+            if dist_to_other < b_i:
+                b_i = dist_to_other
+                
+        max_val = max(a_i, b_i)
+        s_i = (b_i - a_i) / max_val if max_val > 0 else 0.0
+        silhouettes.append(s_i)
+        
+    return float(np.mean(silhouettes))
 
 
 def kmeans_cluster(X: np.ndarray, k: int, max_iters: int = 100) -> np.ndarray:
@@ -148,11 +184,11 @@ class SpeakerDiarizer:
             
         # Determine target number of clusters (speakers)
         # Default to 2 if not provided, or count of names in participant_names
-        k = 2
+        max_k = 2
         if participant_names:
-            k = max(1, len(participant_names))
+            max_k = max(1, len(participant_names))
             
-        logger.info(f"Diarizing {len(segments)} segments into K={k} clusters using audio: {wav_path}")
+        logger.info(f"Diarizing {len(segments)} segments. Upper bound speakers: {max_k}")
         
         # Extract features for all segments
         embeddings = []
@@ -188,6 +224,27 @@ class SpeakerDiarizer:
             
         X = np.stack(embeddings)
         
+        # Find optimal k using Silhouette Coefficient scoring (minimum 2 speakers if possible)
+        k = max_k
+        if len(embeddings) > 2 and max_k > 2:
+            best_k = 2
+            best_score = -1.0
+            
+            # Evaluate silhouette score for each k from 2 up to max_k
+            for test_k in range(2, max_k + 1):
+                if test_k > len(embeddings):
+                    break
+                labels = kmeans_cluster(X, k=test_k)
+                score = compute_silhouette_score(X, labels)
+                logger.info(f"Diarizer: Silhouette Score for K={test_k} is {score:.4f}")
+                
+                # We select the K that maximizes the clustering silhouette score
+                if score > best_score:
+                    best_score = score
+                    best_k = test_k
+            k = best_k
+            logger.info(f"Diarizer: Selected optimal speaker count K={k} with validation score {best_score:.4f}")
+            
         # Run custom clustering
         cluster_labels = kmeans_cluster(X, k=k)
         
