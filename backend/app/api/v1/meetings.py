@@ -227,7 +227,15 @@ def end_meeting(
     wav_filename = f"meeting_{meeting.id}.wav"
     wav_path = os.path.join(settings.UPLOAD_DIR, wav_filename)
     
-    full_text, segments = transcriber.transcribe(wav_path)
+    # Fetch participant names for speaker diarization
+    participant_names = []
+    if meeting.host:
+        participant_names.append(meeting.host.full_name or meeting.host.email)
+    for p in meeting.participants:
+        if p.name:
+            participant_names.append(p.name)
+            
+    full_text, segments = transcriber.transcribe(wav_path, participant_names=participant_names)
     
     if not full_text:
         full_text = "No audio recorded."
@@ -324,7 +332,15 @@ async def upload_meeting_recording(
     db.add(db_log)
 
     # Speech to text
-    full_text, segments = transcriber.transcribe(wav_path)
+    # Fetch participant names for speaker diarization
+    participant_names = []
+    if meeting.host:
+        participant_names.append(meeting.host.full_name or meeting.host.email)
+    for p in meeting.participants:
+        if p.name:
+            participant_names.append(p.name)
+            
+    full_text, segments = transcriber.transcribe(wav_path, participant_names=participant_names)
     if not full_text:
         full_text = "No transcribable text captured."
 

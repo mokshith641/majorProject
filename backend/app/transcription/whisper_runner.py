@@ -1,10 +1,11 @@
 import logging
 import os
 import time
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 from faster_whisper import WhisperModel
 
 from app.core.config import settings
+from app.transcription.corrector import phonetic_corrector
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ class WhisperTranscriber:
             logger.error(f"Error loading faster-whisper model: {e}")
             raise e
 
-    def transcribe(self, file_path: str) -> Tuple[str, List[Dict]]:
+    def transcribe(self, file_path: str, participant_names: Optional[List[str]] = None) -> Tuple[str, List[Dict]]:
         """
         Transcribe a WAV file.
         Returns:
@@ -77,16 +78,27 @@ class WhisperTranscriber:
                 text_clean = segment.text.strip()
                 if not text_clean:
                     continue
+                
+                # Apply phonetic term correction to the transcribed segment
+                corrected_text = phonetic_corrector.correct_text(text_clean)
                     
-                full_text_list.append(text_clean)
+                full_text_list.append(corrected_text)
                 segment_list.append({
                     "start": round(segment.start, 2),
                     "end": round(segment.end, 2),
-                    "text": text_clean,
+                    "text": corrected_text,
                     "speaker": "Speaker 1"  # Default speaker mapping
                 })
                 
             full_text = " ".join(full_text_list)
+            
+            # Apply speaker diarization clustering on segment audio clips
+            try:
+                from app.transcription.diarizer import speaker_diarizer
+                segment_list = speaker_diarizer.diarize_segments(file_path, segment_list, participant_names)
+            except Exception as e:
+                logger.error(f"Failed to execute speaker diarization: {e}")
+                
             duration = round(time.time() - start_time, 2)
             logger.info(f"Transcription complete in {duration} seconds. Transcribed {len(segment_list)} segments.")
             return full_text, segment_list
