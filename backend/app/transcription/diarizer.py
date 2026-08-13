@@ -191,10 +191,8 @@ class SpeakerDiarizer:
             
         try:
             # Determine target number of clusters (speakers)
-            # Default to 2 if not provided, or count of names in participant_names
-            max_k = 2
-            if participant_names:
-                max_k = max(1, len(participant_names))
+            # Search up to 6 speakers to automatically detect extra participants, or more if registered
+            max_k = max(6, len(participant_names) if participant_names else 2)
                 
             logger.info(f"Diarizing {len(segments)} segments. Upper bound speakers: {max_k}")
             
