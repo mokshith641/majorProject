@@ -6,28 +6,35 @@ from scipy.io import wavfile
 
 logger = logging.getLogger(__name__)
 
+# Global cache to optimize file reading during diarization loops
+_audio_cache = {}
+
 
 def extract_segment_audio(wav_path: str, start_sec: float, end_sec: float) -> Tuple[np.ndarray, int]:
     """
     Reads a slice of the WAV audio corresponding to start_sec and end_sec.
-    Converts stereo to mono and normalizes scale.
+    Converts stereo to mono and normalizes scale. Caches loaded audio to prevent redundant disk reads.
     """
     if not os.path.exists(wav_path):
         return np.array([], dtype=np.float32), 16000
         
     try:
-        sample_rate, data = wavfile.read(wav_path)
-        # Convert stereo to mono
-        if len(data.shape) > 1:
-            data = data.mean(axis=1)
-            
-        # Normalize to float32 between [-1.0, 1.0]
-        if data.dtype == np.int16:
-            data = data.astype(np.float32) / 32768.0
-        elif data.dtype == np.int32:
-            data = data.astype(np.float32) / 2147483648.0
-        elif data.dtype == np.uint8:
-            data = (data.astype(np.float32) - 128.0) / 128.0
+        if wav_path not in _audio_cache:
+            sample_rate, data = wavfile.read(wav_path)
+            # Convert stereo to mono
+            if len(data.shape) > 1:
+                data = data.mean(axis=1)
+                
+            # Normalize to float32 between [-1.0, 1.0]
+            if data.dtype == np.int16:
+                data = data.astype(np.float32) / 32768.0
+            elif data.dtype == np.int32:
+                data = data.astype(np.float32) / 2147483648.0
+            elif data.dtype == np.uint8:
+                data = (data.astype(np.float32) - 128.0) / 128.0
+            _audio_cache[wav_path] = (sample_rate, data)
+        else:
+            sample_rate, data = _audio_cache[wav_path]
             
         start_sample = int(start_sec * sample_rate)
         end_sample = int(end_sec * sample_rate)
@@ -182,100 +189,104 @@ class SpeakerDiarizer:
         if not segments:
             return []
             
-        # Determine target number of clusters (speakers)
-        # Default to 2 if not provided, or count of names in participant_names
-        max_k = 2
-        if participant_names:
-            max_k = max(1, len(participant_names))
-            
-        logger.info(f"Diarizing {len(segments)} segments. Upper bound speakers: {max_k}")
-        
-        # Extract features for all segments
-        embeddings = []
-        valid_indices = [] # Indices of segments that are long/loud enough to cluster
-        
-        for idx, seg in enumerate(segments):
-            start = seg.get("start", 0.0)
-            end = seg.get("end", 0.0)
-            duration = end - start
-            
-            # Skip very short segment clips to prevent noise fitting
-            if duration < 0.4:
-                continue
+        try:
+            # Determine target number of clusters (speakers)
+            # Default to 2 if not provided, or count of names in participant_names
+            max_k = 2
+            if participant_names:
+                max_k = max(1, len(participant_names))
                 
-            audio_slice, sr = extract_segment_audio(wav_path, start, end)
+            logger.info(f"Diarizing {len(segments)} segments. Upper bound speakers: {max_k}")
             
-            # Check for silence (low average amplitude)
-            if len(audio_slice) == 0 or np.max(np.abs(audio_slice)) < 1e-4:
-                continue
+            # Extract features for all segments
+            embeddings = []
+            valid_indices = [] # Indices of segments that are long/loud enough to cluster
+            
+            for idx, seg in enumerate(segments):
+                start = seg.get("start", 0.0)
+                end = seg.get("end", 0.0)
+                duration = end - start
                 
-            features = extract_voice_print(audio_slice, sr)
-            if np.any(features):
-                embeddings.append(features)
-                valid_indices.append(idx)
-                
-        # If we didn't get enough valid segments to run clustering, return default speaker labels
-        if len(embeddings) == 0:
-            logger.warning("No audio segments met minimum criteria for voice print clustering. Using default speaker.")
-            default_name = participant_names[0] if participant_names else "Speaker 1"
-            for seg in segments:
-                seg["speaker"] = default_name
-            return segments
-            
-        X = np.stack(embeddings)
-        
-        # Find optimal k using Silhouette Coefficient scoring (minimum 2 speakers if possible)
-        k = max_k
-        if len(embeddings) > 2 and max_k > 2:
-            best_k = 2
-            best_score = -1.0
-            
-            # Evaluate silhouette score for each k from 2 up to max_k
-            for test_k in range(2, max_k + 1):
-                if test_k > len(embeddings):
-                    break
-                labels = kmeans_cluster(X, k=test_k)
-                score = compute_silhouette_score(X, labels)
-                logger.info(f"Diarizer: Silhouette Score for K={test_k} is {score:.4f}")
-                
-                # We select the K that maximizes the clustering silhouette score
-                if score > best_score:
-                    best_score = score
-                    best_k = test_k
-            k = best_k
-            logger.info(f"Diarizer: Selected optimal speaker count K={k} with validation score {best_score:.4f}")
-            
-        # Run custom clustering
-        cluster_labels = kmeans_cluster(X, k=k)
-        
-        # Map cluster IDs (0 to k-1) to names
-        # Format: "Speaker A", "Speaker B" or actual participant names
-        speaker_mapping = {}
-        for i in range(k):
-            if participant_names and i < len(participant_names):
-                speaker_mapping[i] = participant_names[i]
-            else:
-                # Fallback Speaker letters (Speaker A, B, C...)
-                speaker_mapping[i] = f"Speaker {chr(65 + i)}"
-                
-        # Map valid segments
-        for idx, cluster_id in zip(valid_indices, cluster_labels):
-            segments[idx]["speaker"] = speaker_mapping.get(cluster_id, f"Speaker {cluster_id}")
-            
-        # Map invalid (short/silent) segments to their nearest valid neighbor in time
-        # This keeps the conversation turns continuous
-        for idx in range(len(segments)):
-            if idx not in valid_indices:
-                # Find closest index in valid_indices
-                if not valid_indices:
-                    # Fallback
-                    segments[idx]["speaker"] = speaker_mapping[0]
+                # Skip very short segment clips to prevent noise fitting
+                if duration < 0.4:
                     continue
                     
-                closest_valid_idx = min(valid_indices, key=lambda x: abs(x - idx))
-                segments[idx]["speaker"] = segments[closest_valid_idx]["speaker"]
+                audio_slice, sr = extract_segment_audio(wav_path, start, end)
                 
-        return segments
+                # Check for silence (low average amplitude)
+                if len(audio_slice) == 0 or np.max(np.abs(audio_slice)) < 1e-4:
+                    continue
+                    
+                features = extract_voice_print(audio_slice, sr)
+                if np.any(features):
+                    embeddings.append(features)
+                    valid_indices.append(idx)
+                    
+            # If we didn't get enough valid segments to run clustering, return default speaker labels
+            if len(embeddings) == 0:
+                logger.warning("No audio segments met minimum criteria for voice print clustering. Using default speaker.")
+                default_name = participant_names[0] if participant_names else "Speaker 1"
+                for seg in segments:
+                    seg["speaker"] = default_name
+                return segments
+                
+            X = np.stack(embeddings)
+            
+            # Find optimal k using Silhouette Coefficient scoring (minimum 2 speakers if possible)
+            k = max_k
+            if len(embeddings) > 2 and max_k > 2:
+                best_k = 2
+                best_score = -1.0
+                
+                # Evaluate silhouette score for each k from 2 up to max_k
+                for test_k in range(2, max_k + 1):
+                    if test_k > len(embeddings):
+                        break
+                    labels = kmeans_cluster(X, k=test_k)
+                    score = compute_silhouette_score(X, labels)
+                    logger.info(f"Diarizer: Silhouette Score for K={test_k} is {score:.4f}")
+                    
+                    # We select the K that maximizes the clustering silhouette score
+                    if score > best_score:
+                        best_score = score
+                        best_k = test_k
+                k = best_k
+                logger.info(f"Diarizer: Selected optimal speaker count K={k} with validation score {best_score:.4f}")
+                
+            # Run custom clustering
+            cluster_labels = kmeans_cluster(X, k=k)
+            
+            # Map cluster IDs (0 to k-1) to names
+            # Format: "Speaker A", "Speaker B" or actual participant names
+            speaker_mapping = {}
+            for i in range(k):
+                if participant_names and i < len(participant_names):
+                    speaker_mapping[i] = participant_names[i]
+                else:
+                    # Fallback Speaker letters (Speaker A, B, C...)
+                    speaker_mapping[i] = f"Speaker {chr(65 + i)}"
+                    
+            # Map valid segments
+            for idx, cluster_id in zip(valid_indices, cluster_labels):
+                segments[idx]["speaker"] = speaker_mapping.get(cluster_id, f"Speaker {cluster_id}")
+                
+            # Map invalid (short/silent) segments to their nearest valid neighbor in time
+            # This keeps the conversation turns continuous
+            for idx in range(len(segments)):
+                if idx not in valid_indices:
+                    # Find closest index in valid_indices
+                    if not valid_indices:
+                        # Fallback
+                        segments[idx]["speaker"] = speaker_mapping[0]
+                        continue
+                        
+                    closest_valid_idx = min(valid_indices, key=lambda x: abs(x - idx))
+                    segments[idx]["speaker"] = segments[closest_valid_idx]["speaker"]
+                    
+            return segments
+        finally:
+            # Clear the cached WAV file to prevent memory leak
+            _audio_cache.pop(wav_path, None)
 
 
 # Singleton instance
