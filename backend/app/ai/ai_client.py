@@ -91,6 +91,51 @@ def clean_task_description(text: str) -> str:
     return text
 
 
+def is_filler_sentence(sentence: str) -> bool:
+    s_clean = re.sub(r'[^\w\s]', '', sentence.strip().lower())
+    words = s_clean.split()
+    if not words:
+        return True
+    if len(words) <= 2:
+        return True
+    
+    # Common audio/greeting/filler checks
+    filler_phrases = [
+        "can you hear me",
+        "i can hear you",
+        "hear you loud and clear",
+        "sound check",
+        "testing testing",
+        "good morning",
+        "good afternoon",
+        "good evening",
+        "talk to you later",
+        "see you later",
+        "see you tomorrow",
+        "loud and clear",
+        "see you"
+    ]
+    for phrase in filler_phrases:
+        if phrase in s_clean:
+            return True
+            
+    fillers = {"hello", "hi", "hey", "bye", "goodbye", "thanks", "thank", "you", "ok", "okay", "yes", "no", "yeah", "yep", "alright", "perfect", "sure", "cool", "great", "welcome"}
+    if all(w in fillers or w in {"i", "we", "the", "me", "us", "it", "to", "and", "a", "is", "am", "are", "was", "were", "be", "been"} for w in words):
+        return True
+        
+    return False
+
+
+def is_topic_introduction(sentence: str) -> bool:
+    s_lower = sentence.strip().lower()
+    starters = [
+        "let's discuss", "lets discuss", "quickly discuss", "discuss the",
+        "talk about", "welcome to", "thanks for joining", "thanks for coming",
+        "can everyone hear", "can you hear"
+    ]
+    return any(start in s_lower for start in starters)
+
+
 class LocalIntelligenceClient:
     """
     Manages AI completions using local T5-Base summarization and rule-based NLP extraction,
@@ -103,7 +148,7 @@ class LocalIntelligenceClient:
         self.model = "offline-nlp-t5-base"
         self._tokenizer = None
         self._t5_model = None
-
+ 
     def _get_t5(self):
         if self._tokenizer is None or self._t5_model is None:
             logger.info("Initializing offline T5-base model and tokenizer...")
@@ -145,6 +190,9 @@ class LocalIntelligenceClient:
                 "action_items": []
             }
 
+        word_count = len(transcript.split())
+        is_short = word_count < 250
+
         # Check if Groq API is enabled and user explicitly wants to use it
         if settings.GROQ_API_KEY:
             logger.info("Generating high-quality summary via Groq Cloud API...")
@@ -171,6 +219,14 @@ class LocalIntelligenceClient:
                     "}\n"
                     "Return ONLY the raw JSON object. Do not include markdown code block syntax."
                 )
+
+                if is_short:
+                    system_prompt += (
+                        "\nIMPORTANT: The meeting is very short (under 3 minutes) or has a brief transcript. "
+                        "You MUST generate an accurate and specific summary based on the actual discussion points, even if they are brief or informal. "
+                        "Do NOT return generic placeholders like 'No discussion recorded' or 'None identified' if there is any conversation. "
+                        "Extract the specific updates, decisions, risks, or tasks mentioned, even if simple."
+                    )
 
                 for model_name in ["llama-3.3-70b-specdec", "llama-3.1-8b-instant", "llama3-8b-8192"]:
                     try:
@@ -202,7 +258,7 @@ class LocalIntelligenceClient:
     def _generate_local_summary(self, transcript: str) -> Dict[str, any]:
         """
         Extracts summary components from a meeting transcript offline:
-        - Key points (using T5 chunk-wise summarization)
+        - Key points (using T5 chunk-wise summarization or direct extraction if short)
         - Core decisions (using hybrid keyword-T5 extraction)
         - Highlighted risks (using hybrid keyword-T5 extraction)
         - Action items (using hybrid keyword-T5 task cleaning and metadata parser)
@@ -257,72 +313,136 @@ class LocalIntelligenceClient:
                 "action_items": []
             }
 
-        # 1. Key Points Generation: Chunk transcript and run T5 on each chunk
-        chunks = []
-        current_chunk = []
-        current_word_count = 0
-        
-        for sentence, _ in context_sentences:
-            words = sentence.split()
-            if current_word_count + len(words) > 350:
-                chunks.append(" ".join(current_chunk))
-                current_chunk = [sentence]
-                current_word_count = len(words)
-            else:
-                current_chunk.append(sentence)
-                current_word_count += len(words)
-                
-        if current_chunk:
-            chunks.append(" ".join(current_chunk))
-            
+        total_words = sum(len(s.split()) for s, _ in context_sentences)
+        is_short = total_words < 250 or len(context_sentences) < 15
+
+        # 1. Key Points Generation
         key_points_list = []
-        for idx, chunk in enumerate(chunks[:5]): # limit to top 5 chunks
-            chunk_summary = self._run_t5_summary(chunk, max_length=80)
-            if chunk_summary and len(chunk_summary.strip()) > 5:
-                key_points_list.append(clean_task_description(chunk_summary.strip()))
+        if is_short:
+            # For short meetings, bypass T5 to avoid blanking out the summary
+            for s, speaker in context_sentences:
+                if not is_filler_sentence(s):
+                    cleaned = clean_task_description(s)
+                    if speaker and speaker != "Unknown":
+                        if not cleaned.lower().startswith(speaker.lower()):
+                            cleaned = f"{speaker}: {cleaned}"
+                    key_points_list.append(cleaned)
+            
+            if not key_points_list:
+                key_points_list = [clean_task_description(s) for s, _ in context_sentences if len(s.split()) > 3]
+            key_points_formatted = "\n".join(f"- {pt}" for pt in key_points_list[:8]) if key_points_list else "- No discussion recorded."
+        else:
+            chunks = []
+            current_chunk = []
+            current_word_count = 0
+            
+            for sentence, _ in context_sentences:
+                words = sentence.split()
+                if current_word_count + len(words) > 350:
+                    chunks.append(" ".join(current_chunk))
+                    current_chunk = [sentence]
+                    current_word_count = len(words)
+                else:
+                    current_chunk.append(sentence)
+                    current_word_count += len(words)
+                    
+            if current_chunk:
+                chunks.append(" ".join(current_chunk))
                 
-        key_points_formatted = "\n".join(f"- {pt}" for pt in key_points_list) if key_points_list else "- No discussion recorded."
+            for idx, chunk in enumerate(chunks[:5]): # limit to top 5 chunks
+                chunk_words = len(chunk.split())
+                if chunk_words < 50:
+                    # Bypass T5 for very short chunks
+                    chunk_sents = split_into_sentences(chunk)
+                    for s in chunk_sents:
+                        if not is_filler_sentence(s):
+                            key_points_list.append(clean_task_description(s))
+                else:
+                    chunk_summary = self._run_t5_summary(chunk, max_length=80)
+                    if chunk_summary and len(chunk_summary.strip()) > 5:
+                        key_points_list.append(clean_task_description(chunk_summary.strip()))
+            key_points_formatted = "\n".join(f"- {pt}" for pt in key_points_list) if key_points_list else "- No discussion recorded."
 
         # Heuristic search configuration for other sections
-        decision_keywords = ["agree", "agreed", "consensus", "decide", "decided", "approved", "settle", "settled", "approve", "conclude", "concluded", "we will", "resolved"]
-        risk_keywords = ["risk", "worry", "concern", "bug", "issue", "blocker", "fail", "danger", "delay", "difficult", "warn", "warning", "threat", "broken", "critical"]
-        next_steps_keywords = ["next steps", "milestone", "upcoming", "roadmap", "timeline", "schedule", "future", "later on", "next phase"]
-        action_keywords = ["todo", "task", "action", "assign", "need to", "must", "responsible", "will handle", "action item", "to do", "assigned to"]
+        decision_keywords = ["agree", "agreed", "consensus", "decide", "decided", "approved", "settle", "settled", "approve", "conclude", "concluded", "we will", "resolved", "let's", "lets", "going to", "should", "want to", "confirmed", "confirm", "finalized", "finalize"]
+        risk_keywords = ["risk", "worry", "concern", "bug", "issue", "blocker", "fail", "danger", "delay", "difficult", "warn", "warning", "threat", "broken", "critical", "problem", "error", "failure", "problematic", "obstacle", "bottleneck", "locked", "locking", "lock", "slow", "crashed", "crash", "crashes", "leaking", "leak", "buggy", "failed"]
+        next_steps_keywords = ["next steps", "milestone", "upcoming", "roadmap", "timeline", "schedule", "future", "later on", "next phase", "plan to", "after this", "subsequently", "proceed with", "action plan", "next up", "going forward"]
+        action_keywords = ["todo", "task", "action", "assign", "need to", "must", "responsible", "will handle", "action item", "to do", "assigned to", "will take care of", "will look into", "work on", "create", "fix", "update", "implement", "test", "deploy"]
 
         decision_sentences = []
         risk_sentences = []
         next_steps_sentences = []
         action_sentences_context = [] # list of tuples: (sentence, speaker)
 
-        for s, speaker in context_sentences:
+        for idx, (s, speaker) in enumerate(context_sentences):
             s_lower = s.lower()
+            # Skip filler or topic intro unless it contains strong agreement keywords
+            if is_filler_sentence(s) or is_topic_introduction(s):
+                if not any(kw in s_lower for kw in ["agree", "agreed", "consensus", "approved", "resolved"]):
+                    continue
+            
+            # 1. Decisions
             if any(kw in s_lower for kw in decision_keywords):
-                decision_sentences.append(s)
+                if len(s.split()) <= 2 and idx > 0:
+                    prev_s, prev_speaker = context_sentences[idx-1]
+                    if not is_filler_sentence(prev_s) and not is_topic_introduction(prev_s):
+                        decision_sentences.append(f"{prev_speaker} proposed and {speaker} agreed: {prev_s}")
+                else:
+                    decision_sentences.append(s)
+            
+            # 2. Risks
             if any(kw in s_lower for kw in risk_keywords):
                 risk_sentences.append(s)
+                
+            # 3. Next steps
             if any(kw in s_lower for kw in next_steps_keywords):
                 next_steps_sentences.append(s)
-            if any(kw in s_lower for kw in action_keywords) or ("will" in s_lower and any(name.lower() in s_lower for name in participants)):
+                
+            # 4. Action Items
+            is_action = False
+            if any(kw in s_lower for kw in action_keywords):
+                is_action = True
+            elif "will" in s_lower or "going to" in s_lower or "gonna" in s_lower:
+                if speaker and speaker != "Unknown":
+                    is_action = True
+                elif any(name.lower() in s_lower for name in participants):
+                    is_action = True
+            
+            if is_action:
                 action_sentences_context.append((s, speaker))
 
         # 2. Decisions Generation
         if decision_sentences:
-            merged_decisions = " ".join(decision_sentences)
-            decisions_summary = self._run_t5_summary(merged_decisions, max_length=120)
-            dec_pts = split_into_sentences(decisions_summary)
-            dec_pts_cleaned = [clean_task_description(dec) for dec in dec_pts]
+            total_words_dec = sum(len(s.split()) for s in decision_sentences)
+            if total_words_dec < 50:
+                dec_pts_cleaned = [clean_task_description(s) for s in decision_sentences if not is_filler_sentence(s) or any(kw in s.lower() for kw in ["proposed and", "agreed:"])]
+                if not dec_pts_cleaned:
+                    dec_pts_cleaned = [clean_task_description(s) for s in decision_sentences]
+            else:
+                merged_decisions = " ".join(decision_sentences)
+                decisions_summary = self._run_t5_summary(merged_decisions, max_length=120)
+                dec_pts = split_into_sentences(decisions_summary)
+                dec_pts_cleaned = [clean_task_description(dec) for dec in dec_pts]
+            
             decisions_formatted = "\n".join(f"{i+1}. {dec.strip()}" for i, dec in enumerate(dec_pts_cleaned[:4]) if len(dec.strip()) > 3)
             if not decisions_formatted.strip():
-                decisions_formatted = "1. Standard meeting progression; no formal decisions recorded."
+                decisions_formatted = "1. General agreement on discussion points; no formal decisions recorded."
         else:
-            decisions_formatted = "1. Standard meeting progression; no formal decisions recorded."
+            decisions_formatted = "1. General agreement on discussion points; no formal decisions recorded."
 
         # 3. Risks Generation
         if risk_sentences:
-            merged_risks = " ".join(risk_sentences)
-            risks_summary = self._run_t5_summary(merged_risks, max_length=100)
-            risk_pts = split_into_sentences(risks_summary)
-            risk_pts_cleaned = [clean_task_description(risk) for risk in risk_pts]
+            total_words_risks = sum(len(s.split()) for s in risk_sentences)
+            if total_words_risks < 50:
+                risk_pts_cleaned = [clean_task_description(s) for s in risk_sentences if not is_filler_sentence(s)]
+                if not risk_pts_cleaned:
+                    risk_pts_cleaned = [clean_task_description(s) for s in risk_sentences]
+            else:
+                merged_risks = " ".join(risk_sentences)
+                risks_summary = self._run_t5_summary(merged_risks, max_length=100)
+                risk_pts = split_into_sentences(risks_summary)
+                risk_pts_cleaned = [clean_task_description(risk) for risk in risk_pts]
+            
             risks_formatted = "\n".join(f"- {risk.strip()}" for risk in risk_pts_cleaned[:4] if len(risk.strip()) > 3)
             if not risks_formatted.strip():
                 risks_formatted = "- No critical risks or blockers identified."
@@ -330,27 +450,40 @@ class LocalIntelligenceClient:
             risks_formatted = "- No critical risks or blockers identified."
 
         # 4. Next Steps Generation
+        next_steps_formatted = ""
         if next_steps_sentences:
-            merged_ns = " ".join(next_steps_sentences)
-            ns_summary = self._run_t5_summary(merged_ns, max_length=100)
-            ns_pts = split_into_sentences(ns_summary)
-            ns_pts_cleaned = [clean_task_description(ns) for ns in ns_pts]
+            total_words_ns = sum(len(s.split()) for s in next_steps_sentences)
+            if total_words_ns < 50:
+                ns_pts_cleaned = [clean_task_description(s) for s in next_steps_sentences if not is_filler_sentence(s)]
+                if not ns_pts_cleaned:
+                    ns_pts_cleaned = [clean_task_description(s) for s in next_steps_sentences]
+            else:
+                merged_ns = " ".join(next_steps_sentences)
+                ns_summary = self._run_t5_summary(merged_ns, max_length=100)
+                ns_pts = split_into_sentences(ns_summary)
+                ns_pts_cleaned = [clean_task_description(ns) for ns in ns_pts]
+            
             next_steps_formatted = "\n".join(f"- {ns.strip()}" for ns in ns_pts_cleaned[:3] if len(ns.strip()) > 3)
+
+        # Fallback for next steps in short meetings: extract from the end of the meeting
+        if not next_steps_formatted.strip():
+            end_sentences = [s for s, _ in context_sentences[-4:] if not is_filler_sentence(s) and not is_topic_introduction(s)]
+            if end_sentences:
+                ns_pts_cleaned = [clean_task_description(s) for s in end_sentences]
+                next_steps_formatted = "\n".join(f"- {ns.strip()}" for ns in ns_pts_cleaned[:3] if len(ns.strip()) > 3)
+            
             if not next_steps_formatted.strip():
                 next_steps_formatted = "- Proceed with standard project roadmap."
-        else:
-            next_steps_formatted = "- Proceed with standard project roadmap."
 
         # 5. Action Items Generation
         action_items_list = []
         for s, speaker in action_sentences_context[:8]: # Process up to 8 action items
             s_lower = s.lower()
             
-            # Clean task text
-            task_desc = self._run_t5_summary(s, max_length=45).strip()
+            # Clean task text - bypass T5 for single sentence task descriptions
+            task_desc = clean_task_description(s)
             if not task_desc or len(task_desc) < 5:
                 task_desc = s
-            task_desc = clean_task_description(task_desc)
 
             # 1. Assignee detection (avoid pronouns and select actual name)
             assignee = "TBD"
