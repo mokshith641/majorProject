@@ -50,10 +50,15 @@ def clean_task_description(text: str) -> str:
     text = text.strip()
     
     # Strip speaker prefix (e.g. "Developer: ", "Priya: ", "Daniel:")
-    speaker_match = re.match(r'^(?:\[\d{2}:\d{2}:\d{2}\]\s+)?([a-zA-Z]+):\s*', text)
+    speaker_match = re.match(r'^(?:\[\d{2}:\d{2}:\d{2}\]\s+)?([a-zA-Z0-9\s_]+):\s*', text)
     if speaker_match:
         text = text[speaker_match.end():].strip()
         
+    # Strip leading addressee name (e.g. "Neha, " or "Priya, ")
+    addressee_match = re.match(r'^[a-zA-Z0-9\s_]+\s*,\s*', text)
+    if addressee_match:
+        text = text[addressee_match.end():].strip()
+
     # Strip common starting conversational fillers
     fillers = [
         r"^yes,\s*", r"^sure,\s*", r"^ok,\s*", r"^so,\s*", r"^agreed,\s*", r"^great,\s*", 
@@ -69,22 +74,28 @@ def clean_task_description(text: str) -> str:
                 changed = True
                 break
 
-    # Strip pronouns and modals (avoiding pronouns at the beginning of actions)
-    prefixes = [
-        r"^(?:i|we|he|she|they|you)\s+(?:will|shall|should|must|can|could|would|might|ll)\b",
-        r"^(?:i|we|he|she|they|you)\s+(?:need|want)\s+to\b",
-        r"^(?:i\'ll|we\'ll|they\'ll|you\'ll)\b",
-        r"^(?:let\'s|lets)\b",
-        r"^(?:i|we|he|she|they|you)\s+have\s+to\b",
-        r"^(?:i|we|he|she|they|you)\s+want\s+us\s+to\b",
-    ]
-    
-    s_lower = text.lower()
-    for pat in prefixes:
-        match = re.match(pat, s_lower)
-        if match:
-            text = text[match.end():].strip()
-            break
+    # Recursively strip leading pronouns, modals, and auxiliary constructs
+    changed = True
+    while changed:
+        changed = False
+        s_lower = text.lower()
+        
+        # List of regex patterns to strip at the start
+        strip_patterns = [
+            r"^(?:i|we|he|she|they|you|it|who)\b",
+            r"^(?:will|would|should|could|shall|can|must|might|may|ll)\b",
+            r"^(?:also|just|really|then|probably|actually|basically|so|now|please|simply)\b",
+            r"^(?:need|needs|want|wants|hope|hopes|think|thinks|thought|like|likes|have|has|had|go|going)\b",
+            r"^(?:to|us|for|that|this)\b",
+            r"^(?:let\'s|lets)\b",
+            r"^(?:\'ll|\'d|\'re|\'ve|\'s)\b"
+        ]
+        for pat in strip_patterns:
+            match = re.match(pat, s_lower)
+            if match:
+                text = text[match.end():].strip()
+                changed = True
+                break
 
     if text:
         text = text[0].upper() + text[1:]
@@ -134,6 +145,17 @@ def is_topic_introduction(sentence: str) -> bool:
         "can everyone hear", "can you hear"
     ]
     return any(start in s_lower for start in starters)
+
+
+def deduplicate_list(items: List[str]) -> List[str]:
+    seen = set()
+    result = []
+    for item in items:
+        cleaned = item.strip().rstrip(".").strip()
+        if cleaned.lower() not in seen:
+            seen.add(cleaned.lower())
+            result.append(item)
+    return result
 
 
 class LocalIntelligenceClient:
@@ -204,15 +226,15 @@ class LocalIntelligenceClient:
                     "You are an expert AI meeting assistant. You are given a meeting transcript.\n"
                     "Generate a structured JSON summary of the meeting. The output MUST be a valid JSON object matching the following structure:\n"
                     "{\n"
-                    "  \"key_points\": \"- Bullet point 1\\n- Bullet point 2...\",\n"
-                    "  \"decisions\": \"1. Decision 1\\n2. Decision 2...\",\n"
-                    "  \"risks\": \"- Risk/concern 1\\n- Risk/concern 2...\",\n"
-                    "  \"next_steps\": \"- Next step 1\\n- Next step 2...\",\n"
+                    "  \"key_points\": \"- Bullet point 1\\n- Bullet point 2... (ensure these are distinct, crisp, and do not repeat)\",\n"
+                    "  \"decisions\": \"1. Decision 1\\n2. Decision 2... (avoid repetition)\",\n"
+                    "  \"risks\": \"- Risk/concern 1\\n- Risk/concern 2... (avoid repetition)\",\n"
+                    "  \"next_steps\": \"- Next step 1\\n- Next step 2... (avoid repetition)\",\n"
                     "  \"action_items\": [\n"
                     "    {\n"
-                    "      \"task\": \"Clean task description\",\n"
-                    "      \"assignee\": \"Person name or TBD\",\n"
-                    "      \"due_date\": \"Due date/timeframe (e.g. 'Next Friday', '2026-08-15', or 'TBD')\",\n"
+                    "      \"task\": \"Clean task description (avoiding conversational pronouns like 'I', 'we', etc. at the start)\",\n"
+                    "      \"assignee\": \"Actual participant name (do NOT use 'TBD' or pronouns like 'I' or 'We'. Map to the person who spoke or committed to the task)\",\n"
+                    "      \"due_date\": \"Specific timeframe (e.g. 'Today', 'Tomorrow', 'Next week'. Avoid 'TBD', use 'ASAP' if unknown)\",\n"
                     "      \"status\": \"pending\"\n"
                     "    }\n"
                     "  ]\n"
@@ -330,7 +352,6 @@ class LocalIntelligenceClient:
             
             if not key_points_list:
                 key_points_list = [clean_task_description(s) for s, _ in context_sentences if len(s.split()) > 3]
-            key_points_formatted = "\n".join(f"- {pt}" for pt in key_points_list[:8]) if key_points_list else "- No discussion recorded."
         else:
             chunks = []
             current_chunk = []
@@ -361,7 +382,17 @@ class LocalIntelligenceClient:
                     chunk_summary = self._run_t5_summary(chunk, max_length=80)
                     if chunk_summary and len(chunk_summary.strip()) > 5:
                         key_points_list.append(clean_task_description(chunk_summary.strip()))
-            key_points_formatted = "\n".join(f"- {pt}" for pt in key_points_list) if key_points_list else "- No discussion recorded."
+
+        # Split key points list into individual cleaned sentences for cleaner bullets
+        all_key_points = []
+        for pt in key_points_list:
+            for s in split_into_sentences(pt):
+                cleaned_s = clean_task_description(s)
+                if len(cleaned_s.split()) > 2 and cleaned_s.lower() not in ["none identified", "none"]:
+                    all_key_points.append(cleaned_s)
+                    
+        all_key_points = deduplicate_list(all_key_points)
+        key_points_formatted = "\n".join(f"- {pt}" for pt in all_key_points[:10]) if all_key_points else "- No discussion recorded."
 
         # Heuristic search configuration for other sections
         decision_keywords = ["agree", "agreed", "consensus", "decide", "decided", "approved", "settle", "settled", "approve", "conclude", "concluded", "we will", "resolved", "let's", "lets", "going to", "should", "want to", "confirmed", "confirm", "finalized", "finalize"]
@@ -412,6 +443,7 @@ class LocalIntelligenceClient:
                 action_sentences_context.append((s, speaker))
 
         # 2. Decisions Generation
+        dec_pts_cleaned = []
         if decision_sentences:
             total_words_dec = sum(len(s.split()) for s in decision_sentences)
             if total_words_dec < 50:
@@ -424,13 +456,16 @@ class LocalIntelligenceClient:
                 dec_pts = split_into_sentences(decisions_summary)
                 dec_pts_cleaned = [clean_task_description(dec) for dec in dec_pts]
             
-            decisions_formatted = "\n".join(f"{i+1}. {dec.strip()}" for i, dec in enumerate(dec_pts_cleaned[:4]) if len(dec.strip()) > 3)
+            # Clean and deduplicate decisions
+            dec_pts_cleaned = deduplicate_list([d for d in dec_pts_cleaned if len(d.strip()) > 3])
+            decisions_formatted = "\n".join(f"{i+1}. {dec.strip()}" for i, dec in enumerate(dec_pts_cleaned[:5]))
             if not decisions_formatted.strip():
                 decisions_formatted = "1. General agreement on discussion points; no formal decisions recorded."
         else:
             decisions_formatted = "1. General agreement on discussion points; no formal decisions recorded."
 
         # 3. Risks Generation
+        risk_pts_cleaned = []
         if risk_sentences:
             total_words_risks = sum(len(s.split()) for s in risk_sentences)
             if total_words_risks < 50:
@@ -443,7 +478,9 @@ class LocalIntelligenceClient:
                 risk_pts = split_into_sentences(risks_summary)
                 risk_pts_cleaned = [clean_task_description(risk) for risk in risk_pts]
             
-            risks_formatted = "\n".join(f"- {risk.strip()}" for risk in risk_pts_cleaned[:4] if len(risk.strip()) > 3)
+            # Clean and deduplicate risks
+            risk_pts_cleaned = deduplicate_list([r for r in risk_pts_cleaned if len(r.strip()) > 3])
+            risks_formatted = "\n".join(f"- {risk.strip()}" for risk in risk_pts_cleaned[:5])
             if not risks_formatted.strip():
                 risks_formatted = "- No critical risks or blockers identified."
         else:
@@ -451,6 +488,7 @@ class LocalIntelligenceClient:
 
         # 4. Next Steps Generation
         next_steps_formatted = ""
+        ns_pts_cleaned = []
         if next_steps_sentences:
             total_words_ns = sum(len(s.split()) for s in next_steps_sentences)
             if total_words_ns < 50:
@@ -463,20 +501,23 @@ class LocalIntelligenceClient:
                 ns_pts = split_into_sentences(ns_summary)
                 ns_pts_cleaned = [clean_task_description(ns) for ns in ns_pts]
             
-            next_steps_formatted = "\n".join(f"- {ns.strip()}" for ns in ns_pts_cleaned[:3] if len(ns.strip()) > 3)
+            ns_pts_cleaned = deduplicate_list([n for n in ns_pts_cleaned if len(n.strip()) > 3])
+            next_steps_formatted = "\n".join(f"- {ns.strip()}" for ns in ns_pts_cleaned[:5])
 
         # Fallback for next steps in short meetings: extract from the end of the meeting
         if not next_steps_formatted.strip():
             end_sentences = [s for s, _ in context_sentences[-4:] if not is_filler_sentence(s) and not is_topic_introduction(s)]
             if end_sentences:
-                ns_pts_cleaned = [clean_task_description(s) for s in end_sentences]
-                next_steps_formatted = "\n".join(f"- {ns.strip()}" for ns in ns_pts_cleaned[:3] if len(ns.strip()) > 3)
+                ns_pts_cleaned = deduplicate_list([clean_task_description(s) for s in end_sentences if len(s.strip()) > 3])
+                next_steps_formatted = "\n".join(f"- {ns.strip()}" for ns in ns_pts_cleaned[:3])
             
             if not next_steps_formatted.strip():
                 next_steps_formatted = "- Proceed with standard project roadmap."
 
         # 5. Action Items Generation
         action_items_list = []
+        seen_tasks = set()
+        
         for s, speaker in action_sentences_context[:8]: # Process up to 8 action items
             s_lower = s.lower()
             
@@ -484,6 +525,12 @@ class LocalIntelligenceClient:
             task_desc = clean_task_description(s)
             if not task_desc or len(task_desc) < 5:
                 task_desc = s
+
+            # Prevent duplicate tasks
+            task_key = task_desc.strip().rstrip(".").lower()
+            if task_key in seen_tasks:
+                continue
+            seen_tasks.add(task_key)
 
             # 1. Assignee detection (avoid pronouns and select actual name)
             assignee = "TBD"
@@ -500,12 +547,13 @@ class LocalIntelligenceClient:
                     break
 
             # B. If no participant name mentioned, check for self-reference pronouns (I, we, my, me)
-            # and attribute to the active speaker
-            if assignee == "TBD":
-                first_person_patterns = [r"\bi\b", r"\bwe\b", r"\bi'll\b", r"\bwe'll\b", r"\bmy\b", r"\bme\b"]
-                if any(re.search(pat, s_lower) for pat in first_person_patterns):
-                    if speaker and speaker != "Unknown":
-                        assignee = speaker
+            # and attribute to the active speaker, avoiding placeholders
+            if assignee == "TBD" or assignee.lower() in ["i", "we", "user", "me", "us", "they", "he", "she", "you", "team", "admin", "tbd"]:
+                if speaker and speaker != "Unknown" and speaker.lower() not in ["i", "we", "user", "me", "us", "they", "he", "she", "you", "team", "admin", "tbd"]:
+                    assignee = speaker
+                else:
+                    # Fallback to the first participant name or host name to avoid TBD/pronouns
+                    assignee = list(participants)[0] if participants else "Mokshith"
 
             # 2. Due date / Event detection
             due_date = "TBD"
@@ -533,6 +581,10 @@ class LocalIntelligenceClient:
                             due_date = d.capitalize()
                             break
             
+            # Avoid TBD due dates
+            if due_date == "TBD":
+                due_date = "ASAP"
+            
             action_items_list.append({
                 "task": task_desc,
                 "assignee": assignee,
@@ -541,8 +593,9 @@ class LocalIntelligenceClient:
             })
 
         if not action_items_list:
+            default_assignee = list(participants)[0] if participants else "Mokshith"
             action_items_list = [
-                {"task": "Follow up on general discussion points", "assignee": "Moksh", "due_date": "TBD", "status": "pending"}
+                {"task": "Follow up on general discussion points", "assignee": default_assignee, "due_date": "ASAP", "status": "pending"}
             ]
 
         return {
