@@ -237,6 +237,21 @@ def end_meeting(
             
     full_text, segments = transcriber.transcribe(wav_path, participant_names=participant_names)
     
+    # Auto-detect speakers from segments and add them as participants if not already registered
+    detected_speakers = set(seg["speaker"] for seg in segments if seg.get("speaker"))
+    existing_participant_names = {p.name.lower() for p in meeting.participants}
+    if meeting.host:
+        existing_participant_names.add((meeting.host.full_name or "").lower())
+        existing_participant_names.add(meeting.host.email.lower())
+    for speaker in detected_speakers:
+        if speaker.lower() not in existing_participant_names and speaker.lower() not in ["unknown", "time", "speaker"]:
+            new_participant = Participant(
+                meeting_id=meeting.id,
+                name=speaker,
+                email=None
+            )
+            db.add(new_participant)
+            
     if not full_text:
         full_text = "No audio recorded."
         
@@ -341,6 +356,22 @@ async def upload_meeting_recording(
             participant_names.append(p.name)
             
     full_text, segments = transcriber.transcribe(wav_path, participant_names=participant_names)
+    
+    # Auto-detect speakers from segments and add them as participants if not already registered
+    detected_speakers = set(seg["speaker"] for seg in segments if seg.get("speaker"))
+    existing_participant_names = {p.name.lower() for p in meeting.participants}
+    if meeting.host:
+        existing_participant_names.add((meeting.host.full_name or "").lower())
+        existing_participant_names.add(meeting.host.email.lower())
+    for speaker in detected_speakers:
+        if speaker.lower() not in existing_participant_names and speaker.lower() not in ["unknown", "time", "speaker"]:
+            new_participant = Participant(
+                meeting_id=meeting.id,
+                name=speaker,
+                email=None
+            )
+            db.add(new_participant)
+            
     if not full_text:
         full_text = "No transcribable text captured."
 
@@ -424,6 +455,30 @@ def submit_meeting_transcript(
         focus_score=100.0
     )
     db.add(db_log)
+
+    # Auto-detect speakers from raw transcript text and add them as participants
+    import re
+    speaker_pattern = re.compile(r'(?:\[\d{2}:\d{2}:\d{2}\]\s+)?([a-zA-Z0-9\s_]+):')
+    detected_speakers = set()
+    for line in full_text.split('\n'):
+        match = speaker_pattern.match(line.strip())
+        if match:
+            sp_name = match.group(1).strip()
+            if sp_name and len(sp_name) < 50:
+                detected_speakers.add(sp_name)
+
+    existing_participant_names = {p.name.lower() for p in meeting.participants}
+    if meeting.host:
+        existing_participant_names.add((meeting.host.full_name or "").lower())
+        existing_participant_names.add(meeting.host.email.lower())
+    for speaker in detected_speakers:
+        if speaker.lower() not in existing_participant_names and speaker.lower() not in ["unknown", "time"]:
+            new_participant = Participant(
+                meeting_id=meeting.id,
+                name=speaker,
+                email=None
+            )
+            db.add(new_participant)
 
     db_transcript = Transcript(
         meeting_id=meeting.id,

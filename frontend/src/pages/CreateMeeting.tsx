@@ -29,6 +29,18 @@ export const CreateMeeting: React.FC = () => {
   // Custom transcript state
   const [transcriptText, setTranscriptText] = useState('');
 
+  const handleTranscriptFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      setTranscriptText(text || '');
+    };
+    reader.readAsText(file);
+  };
+
   const {
     register,
     control,
@@ -219,10 +231,22 @@ export const CreateMeeting: React.FC = () => {
           )}
 
           {activeTab === 'transcript' && (
-            <div className="space-y-2">
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
-                Paste Meeting Transcript
-              </label>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  Meeting Transcript
+                </label>
+                <label className="inline-flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 cursor-pointer font-medium">
+                  <Upload className="h-3.5 w-3.5" />
+                  Upload Transcript File
+                  <input
+                    type="file"
+                    accept=".txt,.vtt,.srt,.json"
+                    onChange={handleTranscriptFileUpload}
+                    className="hidden"
+                  />
+                </label>
+              </div>
               <textarea
                 value={transcriptText}
                 onChange={(e) => setTranscriptText(e.target.value)}
@@ -230,6 +254,9 @@ export const CreateMeeting: React.FC = () => {
                 rows={8}
                 className="w-full bg-[#090D16] border border-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-white rounded-lg px-4 py-2.5 text-sm transition-all outline-none resize-y font-mono text-slate-300"
               />
+              <p className="text-xs text-slate-500">
+                You can paste the transcript directly or click the upload button to load a .txt, .vtt, .srt, or .json file.
+              </p>
             </div>
           )}
 
@@ -255,9 +282,7 @@ export const CreateMeeting: React.FC = () => {
                   <div className="flex-1">
                     <input
                       type="text"
-                      {...register(`participants.${index}.name` as const, {
-                        required: index === 0 ? 'First participant name is required' : false,
-                      })}
+                      {...register(`participants.${index}.name` as const)}
                       placeholder="Name (e.g. Alice)"
                       className="w-full bg-[#090D16] border border-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-white rounded-lg px-3 py-2 text-sm outline-none transition-all"
                     />
