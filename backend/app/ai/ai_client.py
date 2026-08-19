@@ -50,14 +50,18 @@ def clean_task_description(text: str) -> str:
     text = text.strip()
     
     # Strip speaker prefix (e.g. "Developer: ", "Priya: ", "Daniel:")
-    speaker_match = re.match(r'^(?:\[\d{2}:\d{2}:\d{2}\]\s+)?([a-zA-Z0-9\s_]+):\s*', text)
+    # Ensure speaker name is a single word or short name (max 20 chars) to prevent matching sentence clauses containing colons
+    speaker_match = re.match(r'^(?:\[\d{2}:\d{2}:\d{2}\]\s+)?([a-zA-Z0-9\s_]{1,20}):\s*', text)
     if speaker_match:
         text = text[speaker_match.end():].strip()
         
     # Strip leading addressee name (e.g. "Neha, " or "Priya, ")
-    addressee_match = re.match(r'^[a-zA-Z0-9\s_]+\s*,\s*', text)
+    # Ensure it is a single word (no spaces) of max 15 chars, capitalized, to avoid matching full clauses ending with commas
+    addressee_match = re.match(r'^[A-Z][a-zA-Z0-9_]{1,14}\s*,\s*', text)
     if addressee_match:
-        text = text[addressee_match.end():].strip()
+        name = addressee_match.group(0).strip().rstrip(",").strip()
+        if name.lower() not in ["first", "last", "next", "then", "so", "actually", "finally", "however", "otherwise"]:
+            text = text[addressee_match.end():].strip()
 
     # Strip common starting conversational fillers
     fillers = [
@@ -167,16 +171,16 @@ class LocalIntelligenceClient:
     def __init__(self):
         self.api_key = settings.GROQ_API_KEY
         self._client = None
-        self.model = "offline-nlp-t5-base"
+        self.model = "offline-nlp-t5-small"
         self._tokenizer = None
         self._t5_model = None
  
     def _get_t5(self):
         if self._tokenizer is None or self._t5_model is None:
-            logger.info("Initializing offline T5-base model and tokenizer...")
-            self._tokenizer = T5Tokenizer.from_pretrained("t5-base")
-            self._t5_model = T5ForConditionalGeneration.from_pretrained("t5-base")
-            logger.info("T5-base initialized successfully.")
+            logger.info("Initializing offline T5-small model and tokenizer...")
+            self._tokenizer = T5Tokenizer.from_pretrained("t5-small")
+            self._t5_model = T5ForConditionalGeneration.from_pretrained("t5-small")
+            logger.info("T5-small initialized successfully.")
         return self._tokenizer, self._t5_model
 
     def _run_t5_summary(self, text: str, max_length: int = 150) -> str:
@@ -185,16 +189,15 @@ class LocalIntelligenceClient:
         try:
             tokenizer, model = self._get_t5()
             inputs = tokenizer.encode("summarize: " + text, return_tensors="pt", max_length=512, truncation=True)
-            outputs = model.generate(
-                inputs, 
-                max_length=max_length, 
-                num_beams=4, 
-                length_penalty=2.0, 
-                early_stopping=True
-            )
+            with torch.inference_mode():
+                outputs = model.generate(
+                    inputs, 
+                    max_length=max_length, 
+                    num_beams=1
+                )
             return tokenizer.decode(outputs[0], skip_special_tokens=True)
         except Exception as e:
-            logger.error(f"Error running T5-base summarization: {e}")
+            logger.error(f"Error running T5-small summarization: {e}")
             return text[:max_length]
 
     @property
@@ -294,8 +297,8 @@ class LocalIntelligenceClient:
                 "action_items": []
             }
 
-        # Dynamic participant extraction from transcript turns
-        speaker_pattern = re.compile(r'(?:\[\d{2}:\d{2}:\d{2}\]\s+)?([a-zA-Z]+):')
+        # Dynamic participant extraction from transcript turns (supporting names with digits, spaces, and underscores like "Speaker 1")
+        speaker_pattern = re.compile(r'(?:\[\d{2}:\d{2}:\d{2}\]\s+)?([a-zA-Z0-9\s_]{1,25}):')
         participants = set()
         for line in transcript.split('\n'):
             match = speaker_pattern.match(line.strip())
@@ -395,7 +398,7 @@ class LocalIntelligenceClient:
         key_points_formatted = "\n".join(f"- {pt}" for pt in all_key_points[:10]) if all_key_points else "- No discussion recorded."
 
         # Heuristic search configuration for other sections
-        decision_keywords = ["agree", "agreed", "consensus", "decide", "decided", "approved", "settle", "settled", "approve", "conclude", "concluded", "we will", "resolved", "let's", "lets", "going to", "should", "want to", "confirmed", "confirm", "finalized", "finalize"]
+        decision_keywords = ["agree", "agreed", "consensus", "decide", "decided", "approved", "settle", "settled", "approve", "conclude", "concluded", "we will", "resolved", "confirmed", "confirm", "finalized", "finalize"]
         risk_keywords = ["risk", "worry", "concern", "bug", "issue", "blocker", "fail", "danger", "delay", "difficult", "warn", "warning", "threat", "broken", "critical", "problem", "error", "failure", "problematic", "obstacle", "bottleneck", "locked", "locking", "lock", "slow", "crashed", "crash", "crashes", "leaking", "leak", "buggy", "failed"]
         next_steps_keywords = ["next steps", "milestone", "upcoming", "roadmap", "timeline", "schedule", "future", "later on", "next phase", "plan to", "after this", "subsequently", "proceed with", "action plan", "next up", "going forward"]
         action_keywords = ["todo", "task", "action", "assign", "need to", "must", "responsible", "will handle", "action item", "to do", "assigned to", "will take care of", "will look into", "work on", "create", "fix", "update", "implement", "test", "deploy"]
@@ -407,13 +410,19 @@ class LocalIntelligenceClient:
 
         for idx, (s, speaker) in enumerate(context_sentences):
             s_lower = s.lower()
+            s_stripped = s.strip()
+            
             # Skip filler or topic intro unless it contains strong agreement keywords
             if is_filler_sentence(s) or is_topic_introduction(s):
                 if not any(kw in s_lower for kw in ["agree", "agreed", "consensus", "approved", "resolved"]):
                     continue
             
+            # Exclude questions and very short sentences (under 3 words) from Decisions, Risks, Next Steps
+            is_question = s_stripped.endswith("?")
+            is_very_short = len(s_stripped.split()) < 3
+            
             # 1. Decisions
-            if any(kw in s_lower for kw in decision_keywords):
+            if not is_question and not is_very_short and any(kw in s_lower for kw in decision_keywords):
                 if len(s.split()) <= 2 and idx > 0:
                     prev_s, prev_speaker = context_sentences[idx-1]
                     if not is_filler_sentence(prev_s) and not is_topic_introduction(prev_s):
@@ -422,11 +431,11 @@ class LocalIntelligenceClient:
                     decision_sentences.append(s)
             
             # 2. Risks
-            if any(kw in s_lower for kw in risk_keywords):
+            if not is_question and not is_very_short and any(kw in s_lower for kw in risk_keywords):
                 risk_sentences.append(s)
                 
             # 3. Next steps
-            if any(kw in s_lower for kw in next_steps_keywords):
+            if not is_question and not is_very_short and any(kw in s_lower for kw in next_steps_keywords):
                 next_steps_sentences.append(s)
                 
             # 4. Action Items
@@ -445,16 +454,7 @@ class LocalIntelligenceClient:
         # 2. Decisions Generation
         dec_pts_cleaned = []
         if decision_sentences:
-            total_words_dec = sum(len(s.split()) for s in decision_sentences)
-            if total_words_dec < 50:
-                dec_pts_cleaned = [clean_task_description(s) for s in decision_sentences if not is_filler_sentence(s) or any(kw in s.lower() for kw in ["proposed and", "agreed:"])]
-                if not dec_pts_cleaned:
-                    dec_pts_cleaned = [clean_task_description(s) for s in decision_sentences]
-            else:
-                merged_decisions = " ".join(decision_sentences)
-                decisions_summary = self._run_t5_summary(merged_decisions, max_length=120)
-                dec_pts = split_into_sentences(decisions_summary)
-                dec_pts_cleaned = [clean_task_description(dec) for dec in dec_pts]
+            dec_pts_cleaned = [clean_task_description(s) for s in decision_sentences if not is_filler_sentence(s)]
             
             # Clean and deduplicate decisions
             dec_pts_cleaned = deduplicate_list([d for d in dec_pts_cleaned if len(d.strip()) > 3])
@@ -467,16 +467,7 @@ class LocalIntelligenceClient:
         # 3. Risks Generation
         risk_pts_cleaned = []
         if risk_sentences:
-            total_words_risks = sum(len(s.split()) for s in risk_sentences)
-            if total_words_risks < 50:
-                risk_pts_cleaned = [clean_task_description(s) for s in risk_sentences if not is_filler_sentence(s)]
-                if not risk_pts_cleaned:
-                    risk_pts_cleaned = [clean_task_description(s) for s in risk_sentences]
-            else:
-                merged_risks = " ".join(risk_sentences)
-                risks_summary = self._run_t5_summary(merged_risks, max_length=100)
-                risk_pts = split_into_sentences(risks_summary)
-                risk_pts_cleaned = [clean_task_description(risk) for risk in risk_pts]
+            risk_pts_cleaned = [clean_task_description(s) for s in risk_sentences if not is_filler_sentence(s)]
             
             # Clean and deduplicate risks
             risk_pts_cleaned = deduplicate_list([r for r in risk_pts_cleaned if len(r.strip()) > 3])
@@ -490,17 +481,7 @@ class LocalIntelligenceClient:
         next_steps_formatted = ""
         ns_pts_cleaned = []
         if next_steps_sentences:
-            total_words_ns = sum(len(s.split()) for s in next_steps_sentences)
-            if total_words_ns < 50:
-                ns_pts_cleaned = [clean_task_description(s) for s in next_steps_sentences if not is_filler_sentence(s)]
-                if not ns_pts_cleaned:
-                    ns_pts_cleaned = [clean_task_description(s) for s in next_steps_sentences]
-            else:
-                merged_ns = " ".join(next_steps_sentences)
-                ns_summary = self._run_t5_summary(merged_ns, max_length=100)
-                ns_pts = split_into_sentences(ns_summary)
-                ns_pts_cleaned = [clean_task_description(ns) for ns in ns_pts]
-            
+            ns_pts_cleaned = [clean_task_description(s) for s in next_steps_sentences if not is_filler_sentence(s)]
             ns_pts_cleaned = deduplicate_list([n for n in ns_pts_cleaned if len(n.strip()) > 3])
             next_steps_formatted = "\n".join(f"- {ns.strip()}" for ns in ns_pts_cleaned[:5])
 
