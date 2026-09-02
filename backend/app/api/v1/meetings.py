@@ -1,8 +1,9 @@
+import json
 import logging
 import os
 from datetime import datetime
 from typing import Any, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 
 from app.api import deps
@@ -21,6 +22,7 @@ from app.ai.ai_client import ai_client
 from app.reports.pdf_generator import generate_meeting_pdf
 from app.monitoring.input_monitor import activity_tracker
 from app.monitoring.vision_monitor import vision_monitor
+from app.websocket.connection_manager import manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -28,6 +30,8 @@ router = APIRouter()
 # Local recorders maps to track which active meetings are recording
 active_recordings: dict[int, LocalAudioRecorder] = {}
 meeting_start_times: dict[int, datetime] = {}
+# Active live captions in-memory buffer per meeting ID
+active_live_transcripts: dict[int, list[dict]] = {}
 
 
 @router.post("/", response_model=MeetingResponse)
@@ -174,6 +178,63 @@ def start_meeting(
     return {"message": "Meeting initialized. Local telemetry active."}
 
 
+@router.websocket("/{id}/ws")
+async def meeting_live_ws(websocket: WebSocket, id: int):
+    """WebSocket endpoint for real-time live captions and participant coordination."""
+    await manager.connect(websocket, id)
+    try:
+        # Send current live transcript history to newly connected participant
+        history = active_live_transcripts.get(id, [])
+        if history:
+            await websocket.send_text(json.dumps({
+                "type": "history",
+                "captions": history
+            }))
+
+        while True:
+            data_text = await websocket.receive_text()
+            try:
+                msg = json.loads(data_text)
+                msg_type = msg.get("type")
+
+                if msg_type == "caption":
+                    caption_payload = {
+                        "type": "caption",
+                        "speaker": msg.get("speaker", "Speaker"),
+                        "text": msg.get("text", "").strip(),
+                        "is_final": bool(msg.get("is_final", False)),
+                        "timestamp": msg.get("timestamp", datetime.utcnow().strftime("%H:%M:%S")),
+                    }
+                    # Save final captions to meeting live buffer
+                    if caption_payload["is_final"] and caption_payload["text"]:
+                        if id not in active_live_transcripts:
+                            active_live_transcripts[id] = []
+                        active_live_transcripts[id].append(caption_payload)
+
+                    # Broadcast to all connected participants in this meeting room
+                    await manager.broadcast_to_meeting(id, caption_payload)
+
+                elif msg_type == "ping":
+                    await websocket.send_text(json.dumps({"type": "pong"}))
+            except json.JSONDecodeError:
+                pass
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, id)
+    except Exception as e:
+        logger.error(f"WebSocket error in meeting {id}: {e}")
+        manager.disconnect(websocket, id)
+
+
+@router.get("/{id}/live-captions")
+def get_live_captions(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+) -> Any:
+    """Retrieve in-memory live caption segments collected during ongoing session."""
+    return active_live_transcripts.get(id, [])
+
+
 @router.post("/{id}/end", response_model=MeetingResponse)
 def end_meeting(
     id: int,
@@ -252,6 +313,20 @@ def end_meeting(
             )
             db.add(new_participant)
             
+    # Enhance transcript with live captions collected during meeting
+    live_caps = active_live_transcripts.pop(meeting.id, [])
+    if live_caps:
+        caption_lines = [f"{c.get('speaker', 'Speaker')}: {c.get('text', '')}" for c in live_caps if c.get("text")]
+        if not full_text or full_text.strip() == "No audio recorded." or len(full_text.split()) < 5:
+            if caption_lines:
+                full_text = "\n".join(caption_lines)
+                segments = [
+                    {"speaker": c.get("speaker", "Speaker"), "text": c.get("text", ""), "start": i * 4, "end": (i + 1) * 4}
+                    for i, c in enumerate(live_caps) if c.get("text")
+                ]
+        elif caption_lines:
+            full_text = full_text + "\n\n" + "\n".join(caption_lines)
+
     if not full_text:
         full_text = "No audio recorded."
         

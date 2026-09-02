@@ -36,7 +36,7 @@ export const MeetingHistory: React.FC = () => {
     meeting.title.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const formatDuration = (sec: int) => {
+  const formatDuration = (sec: number) => {
     const m = Math.floor(sec / 60);
     const s = sec % 60;
     return `${m}m ${s}s`;

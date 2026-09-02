@@ -70,6 +70,8 @@ def update_user_settings(
                 app_settings.GROQ_API_KEY = v
                 ai_client.api_key = v
                 ai_client._client = None  # Force client reinitialization
+            elif k == "gemini_api_key" and v:
+                app_settings.GEMINI_API_KEY = v
                 
         user_settings.api_keys = current_keys
 

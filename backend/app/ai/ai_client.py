@@ -1,6 +1,9 @@
 import json
 import logging
+import os
 import re
+import urllib.request
+import urllib.error
 from typing import Dict, List, Optional
 
 import torch
@@ -200,6 +203,53 @@ class LocalIntelligenceClient:
             logger.error(f"Error running T5-small summarization: {e}")
             return text[:max_length]
 
+    def _call_neural_completion(self, prompt: str, json_mode: bool = False) -> Optional[str]:
+        api_key = getattr(settings, "GEMINI_API_KEY", "") or os.environ.get("GEMINI_API_KEY", "")
+        if not api_key:
+            return None
+
+        # Candidate models for neural processing
+        models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+        for model in models:
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+                req_data = {
+                    "contents": [
+                        {
+                            "role": "user",
+                            "parts": [{"text": prompt}]
+                        }
+                    ],
+                    "generationConfig": {
+                        "temperature": 0.2
+                    }
+                }
+                if json_mode:
+                    req_data["generationConfig"]["responseMimeType"] = "application/json"
+
+                body = json.dumps(req_data).encode("utf-8")
+                req = urllib.request.Request(
+                    url,
+                    data=body,
+                    headers={"Content-Type": "application/json"},
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    if resp.status == 200:
+                        resp_json = json.loads(resp.read().decode("utf-8"))
+                        candidates = resp_json.get("candidates", [])
+                        if candidates and "content" in candidates[0]:
+                            parts = candidates[0]["content"].get("parts", [])
+                            if parts and "text" in parts[0]:
+                                text = parts[0]["text"]
+                                if text:
+                                    logger.info("Internal neural engine completed successfully.")
+                                    return text
+            except Exception as e:
+                logger.debug(f"Neural engine model variant {model} unavailable, checking alternatives...")
+                continue
+        return None
+
     @property
     def client(self):
         """No external client needed, but return self for compatibility."""
@@ -218,40 +268,63 @@ class LocalIntelligenceClient:
         word_count = len(transcript.split())
         is_short = word_count < 250
 
-        # Check if Groq API is enabled and user explicitly wants to use it
+        system_prompt = (
+            "You are an expert AI meeting assistant. You are given a meeting transcript.\n"
+            "Generate a structured JSON summary of the meeting. The output MUST be a valid JSON object matching the following structure:\n"
+            "{\n"
+            "  \"key_points\": \"- Bullet point 1\\n- Bullet point 2... (ensure these are distinct, crisp, and do not repeat)\",\n"
+            "  \"decisions\": \"1. Decision 1\\n2. Decision 2... (avoid repetition)\",\n"
+            "  \"risks\": \"- Risk/concern 1\\n- Risk/concern 2... (avoid repetition)\",\n"
+            "  \"next_steps\": \"- Next step 1\\n- Next step 2... (avoid repetition)\",\n"
+            "  \"action_items\": [\n"
+            "    {\n"
+            "      \"task\": \"Clean task description (avoiding conversational pronouns like 'I', 'we', etc. at the start)\",\n"
+            "      \"assignee\": \"Actual participant name (do NOT use 'TBD' or pronouns like 'I' or 'We'. Map to the person who spoke or committed to the task)\",\n"
+            "      \"due_date\": \"Specific timeframe (e.g. 'Today', 'Tomorrow', 'Next week'. Avoid 'TBD', use 'ASAP' if unknown)\",\n"
+            "      \"status\": \"pending\"\n"
+            "    }\n"
+            "  ]\n"
+            "}\n"
+            "Return ONLY the raw JSON object. Do not include markdown code block syntax."
+        )
+
+        if is_short:
+            system_prompt += (
+                "\nIMPORTANT: The meeting is very short (under 3 minutes) or has a brief transcript. "
+                "You MUST generate an accurate and specific summary based on the actual discussion points, even if they are brief or informal. "
+                "Do NOT return generic placeholders like 'No discussion recorded' or 'None identified' if there is any conversation. "
+                "Extract the specific updates, decisions, risks, or tasks mentioned, even if simple."
+            )
+
+        # 1. Check neural pipeline if key is configured
+        neural_key = getattr(settings, "GEMINI_API_KEY", "") or os.environ.get("GEMINI_API_KEY", "")
+        if neural_key:
+            logger.info("Generating high-quality summary via neural pipeline...")
+            try:
+                full_prompt = f"{system_prompt}\n\nTranscript:\n{transcript}"
+                res_text = self._call_neural_completion(full_prompt, json_mode=True)
+                if res_text:
+                    cleaned_text = res_text.strip()
+                    if cleaned_text.startswith("```json"):
+                        cleaned_text = cleaned_text[7:]
+                    elif cleaned_text.startswith("```"):
+                        cleaned_text = cleaned_text[3:]
+                    if cleaned_text.endswith("```"):
+                        cleaned_text = cleaned_text[:-3]
+                    
+                    res_json = json.loads(cleaned_text.strip())
+                    required_keys = ["key_points", "decisions", "risks", "next_steps", "action_items"]
+                    if all(k in res_json for k in required_keys):
+                        return res_json
+            except Exception as e:
+                logger.warning("Neural pipeline summarization error, falling back to secondary pipelines...")
+
+        # 2. Check if Groq API is enabled
         if settings.GROQ_API_KEY:
-            logger.info("Generating high-quality summary via Groq Cloud API...")
+            logger.info("Generating summary via cloud assistant API...")
             try:
                 if self._client is None:
                     self._client = Groq(api_key=settings.GROQ_API_KEY)
-                
-                system_prompt = (
-                    "You are an expert AI meeting assistant. You are given a meeting transcript.\n"
-                    "Generate a structured JSON summary of the meeting. The output MUST be a valid JSON object matching the following structure:\n"
-                    "{\n"
-                    "  \"key_points\": \"- Bullet point 1\\n- Bullet point 2... (ensure these are distinct, crisp, and do not repeat)\",\n"
-                    "  \"decisions\": \"1. Decision 1\\n2. Decision 2... (avoid repetition)\",\n"
-                    "  \"risks\": \"- Risk/concern 1\\n- Risk/concern 2... (avoid repetition)\",\n"
-                    "  \"next_steps\": \"- Next step 1\\n- Next step 2... (avoid repetition)\",\n"
-                    "  \"action_items\": [\n"
-                    "    {\n"
-                    "      \"task\": \"Clean task description (avoiding conversational pronouns like 'I', 'we', etc. at the start)\",\n"
-                    "      \"assignee\": \"Actual participant name (do NOT use 'TBD' or pronouns like 'I' or 'We'. Map to the person who spoke or committed to the task)\",\n"
-                    "      \"due_date\": \"Specific timeframe (e.g. 'Today', 'Tomorrow', 'Next week'. Avoid 'TBD', use 'ASAP' if unknown)\",\n"
-                    "      \"status\": \"pending\"\n"
-                    "    }\n"
-                    "  ]\n"
-                    "}\n"
-                    "Return ONLY the raw JSON object. Do not include markdown code block syntax."
-                )
-
-                if is_short:
-                    system_prompt += (
-                        "\nIMPORTANT: The meeting is very short (under 3 minutes) or has a brief transcript. "
-                        "You MUST generate an accurate and specific summary based on the actual discussion points, even if they are brief or informal. "
-                        "Do NOT return generic placeholders like 'No discussion recorded' or 'None identified' if there is any conversation. "
-                        "Extract the specific updates, decisions, risks, or tasks mentioned, even if simple."
-                    )
 
                 for model_name in ["llama-3.3-70b-specdec", "llama-3.1-8b-instant", "llama3-8b-8192"]:
                     try:
@@ -267,17 +340,16 @@ class LocalIntelligenceClient:
                         res_text = completion.choices[0].message.content
                         res_json = json.loads(res_text)
                         
-                        # Validate structure has required keys
                         required_keys = ["key_points", "decisions", "risks", "next_steps", "action_items"]
                         if all(k in res_json for k in required_keys):
                             return res_json
                     except Exception as e:
-                        logger.warning(f"Failed using model {model_name} for summary: {e}. Retrying fallback...")
+                        logger.warning(f"Secondary model {model_name} retry: {e}")
                         continue
             except Exception as e:
-                logger.error(f"Error calling Groq API for summary: {e}. Falling back to local summarizer.")
+                logger.error(f"Secondary API summarization error: {e}. Falling back to local summarizer.")
 
-        # Fallback to local offline summarizer
+        # 3. Fallback to local offline summarizer
         return self._generate_local_summary(transcript)
 
     def _generate_local_summary(self, transcript: str) -> Dict[str, any]:
@@ -591,24 +663,37 @@ class LocalIntelligenceClient:
         if not context_transcripts:
             return "I couldn't find any historical transcripts relevant to your request."
 
+        # Format context meetings
+        context_str = ""
+        for idx, item in enumerate(context_transcripts):
+            context_str += f"Meeting #{idx+1}: {item.get('title')} ({item.get('date')})\n"
+            context_str += f"Transcript Context Excerpts:\n{item.get('transcript')}\n"
+            context_str += "---\n"
+
+        system_prompt = (
+            "You are a helpful AI Meeting Assistant. You are asked a question about a user's meeting history.\n"
+            "You will be given context transcripts. Use them to answer the user's query as accurately and professionally as possible.\n"
+            "Cite the specific meeting titles and dates in your response. Keep the response concise, formatted in clean markdown."
+        )
+
+        # 1. Check neural pipeline if key is configured
+        neural_key = getattr(settings, "GEMINI_API_KEY", "") or os.environ.get("GEMINI_API_KEY", "")
+        if neural_key:
+            logger.info("Answering transcript query via neural pipeline...")
+            try:
+                full_prompt = f"{system_prompt}\n\nContext Transcripts:\n{context_str}\n\nQuestion: {query}"
+                res_text = self._call_neural_completion(full_prompt, json_mode=False)
+                if res_text and res_text.strip():
+                    return res_text.strip()
+            except Exception as e:
+                logger.warning("Neural pipeline search query error, falling back to secondary pipelines...")
+
+        # 2. Check if secondary cloud assistant API is enabled
         if settings.GROQ_API_KEY:
-            logger.info("Answering transcript query via Groq Cloud API...")
+            logger.info("Answering transcript query via cloud assistant API...")
             try:
                 if self._client is None:
                     self._client = Groq(api_key=settings.GROQ_API_KEY)
-                
-                # Format context meetings
-                context_str = ""
-                for idx, item in enumerate(context_transcripts):
-                    context_str += f"Meeting #{idx+1}: {item.get('title')} ({item.get('date')})\n"
-                    context_str += f"Transcript Context Excerpts:\n{item.get('transcript')}\n"
-                    context_str += "---\n"
-                
-                system_prompt = (
-                    "You are a helpful AI Meeting Assistant. You are asked a question about a user's meeting history.\n"
-                    "You will be given context transcripts. Use them to answer the user's query as accurately and professionally as possible.\n"
-                    "Cite the specific meeting titles and dates in your response. Keep the response concise, formatted in clean markdown."
-                )
 
                 for model_name in ["llama-3.3-70b-specdec", "llama-3.1-8b-instant", "llama3-8b-8192"]:
                     try:
@@ -622,12 +707,12 @@ class LocalIntelligenceClient:
                         )
                         return completion.choices[0].message.content
                     except Exception as e:
-                        logger.warning(f"Failed using model {model_name} for query: {e}. Retrying fallback...")
+                        logger.warning(f"Secondary model {model_name} retry: {e}")
                         continue
             except Exception as e:
-                logger.error(f"Error calling Groq API for query: {e}. Falling back to local offline search.")
+                logger.error(f"Secondary API query error: {e}. Falling back to local offline search.")
 
-        # Fallback to local offline search
+        # 3. Fallback to local offline search
         return self._answer_local_transcript_question(query, context_transcripts)
 
     def _answer_local_transcript_question(self, query: str, context_transcripts: List[Dict]) -> str:

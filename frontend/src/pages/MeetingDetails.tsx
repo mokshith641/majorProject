@@ -135,7 +135,7 @@ export const MeetingDetails: React.FC = () => {
     );
   }
 
-  const formatDuration = (sec: int) => {
+  const formatDuration = (sec: number) => {
     const m = Math.floor(sec / 60);
     const s = sec % 60;
     return `${m}m ${s}s`;

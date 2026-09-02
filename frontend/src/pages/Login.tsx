@@ -7,7 +7,7 @@ import { AlertCircle, Lock, Mail, Loader2 } from 'lucide-react';
 
 interface LoginFormInputs {
   email: string;
-  password: str;
+  password: string;
 }
 
 export const Login: React.FC = () => {
