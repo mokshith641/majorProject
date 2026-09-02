@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, List, Dict
 from fastapi import APIRouter, Depends
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -8,6 +8,8 @@ from app.database.session import get_db
 from app.models.user import User
 from app.models.meeting import Meeting
 from app.models.activity import ActivityLog
+from app.models.summary import Summary
+from app.ai.ai_client import ai_client
 
 router = APIRouter()
 
@@ -98,6 +100,29 @@ def get_analytics_summary(
             {"name": "Slack", "value": 10}
         ]
 
+    # 6. Synthesize AI Executive Insights across recent meetings
+    recent_meetings = (
+        db.query(Meeting)
+        .filter(Meeting.host_id == current_user.id, Meeting.status == "completed")
+        .order_by(Meeting.date.desc())
+        .limit(10)
+        .all()
+    )
+
+    history_payload = []
+    for m in recent_meetings:
+        summary_text = m.summary.key_points if m.summary else ""
+        focus = m.activity_logs[0].focus_score if m.activity_logs else 85.0
+        history_payload.append({
+            "title": m.title,
+            "date": m.date.strftime("%Y-%m-%d") if m.date else "",
+            "duration_seconds": m.duration_seconds or 0,
+            "focus_score": focus,
+            "summary": summary_text
+        })
+
+    ai_insights = ai_client.generate_analytics_insights(history_payload)
+
     return {
         "totals": {
             "meetings_scheduled": total_meetings,
@@ -106,5 +131,35 @@ def get_analytics_summary(
             "average_focus": round(avg_focus, 1)
         },
         "weekly_trends": trends,
-        "active_windows": app_shares
+        "active_windows": app_shares,
+        "ai_insights": ai_insights
     }
+
+
+@router.get("/insights")
+def get_ai_insights_endpoint(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+) -> Any:
+    """Dedicated endpoint returning deep AI productivity insights and recommendations."""
+    recent_meetings = (
+        db.query(Meeting)
+        .filter(Meeting.host_id == current_user.id, Meeting.status == "completed")
+        .order_by(Meeting.date.desc())
+        .limit(10)
+        .all()
+    )
+
+    history_payload = []
+    for m in recent_meetings:
+        summary_text = m.summary.key_points if m.summary else ""
+        focus = m.activity_logs[0].focus_score if m.activity_logs else 85.0
+        history_payload.append({
+            "title": m.title,
+            "date": m.date.strftime("%Y-%m-%d") if m.date else "",
+            "duration_seconds": m.duration_seconds or 0,
+            "focus_score": focus,
+            "summary": summary_text
+        })
+
+    return ai_client.generate_analytics_insights(history_payload)

@@ -798,8 +798,35 @@ export const LiveMeeting: React.FC = () => {
               {/* TAB: In-call Messages & Real-time Live Transcript */}
               {activeSidebar === 'chat' && (
                 <div className="space-y-3 h-full flex flex-col">
-                  <div className="bg-[#303134]/50 border border-[#3c4043] p-2.5 rounded-lg text-xs text-slate-400">
-                    Messages and spoken live captions appear here in real time.
+                  {/* AI Catch-Up Banner */}
+                  <div className="flex items-center justify-between gap-2 bg-[#303134]/60 border border-[#3c4043] p-2.5 rounded-xl text-xs">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-3.5 w-3.5 text-[#8ab4f8]" />
+                      <span className="text-slate-300 text-[11px]">Need a quick recap?</span>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        try {
+                          const res = await api.post(`/meetings/${id}/catchup`);
+                          const data = res.data;
+                          const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                          setChatMessages((prev) => [
+                            ...prev,
+                            {
+                              id: `ai-catchup-${Date.now()}`,
+                              speaker: 'AI Assistant',
+                              text: `Meeting Catch-Up:\n${data.summary}\n\nCurrent Topic: ${data.active_topic}`,
+                              time: timeStr
+                            }
+                          ]);
+                        } catch (e) {
+                          console.warn("Catch-up notice:", e);
+                        }
+                      }}
+                      className="flex items-center gap-1.5 bg-[#1a73e8]/25 hover:bg-[#1a73e8]/40 border border-[#1a73e8]/50 text-[#8ab4f8] px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer"
+                    >
+                      <span>AI Catch-Up</span>
+                    </button>
                   </div>
 
                   <div className="flex-1 overflow-y-auto space-y-3 pr-1">

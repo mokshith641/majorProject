@@ -45,7 +45,7 @@ export const SearchAssistant: React.FC = () => {
           AI Meeting Search Assistant
         </h2>
         <p className="text-slate-400 text-sm">
-          Ask questions across all historical meeting transcripts using Llama 3.1.
+          Ask questions across all historical meeting transcripts with intelligent neural retrieval.
         </p>
       </div>
 

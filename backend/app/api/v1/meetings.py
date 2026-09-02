@@ -235,6 +235,20 @@ def get_live_captions(
     return active_live_transcripts.get(id, [])
 
 
+@router.post("/{id}/catchup")
+def get_meeting_catchup(
+    id: int,
+    payload: dict = None,
+    current_user: User = Depends(deps.get_current_active_user),
+) -> Any:
+    """Real-time catch-up summary of in-progress meeting using live captions."""
+    live_caps = active_live_transcripts.get(id, [])
+    transcript_lines = [f"{c.get('speaker', 'Speaker')}: {c.get('text', '')}" for c in live_caps if c.get("text")]
+    query = (payload or {}).get("query")
+    catchup_data = ai_client.generate_live_catchup(transcript_lines, question=query)
+    return catchup_data
+
+
 @router.post("/{id}/end", response_model=MeetingResponse)
 def end_meeting(
     id: int,
@@ -337,8 +351,20 @@ def end_meeting(
     )
     db.add(db_transcript)
 
-    # 3. Generate summary using Groq
+    # 3. Generate summary and auto-detect smart title if generic
     summary_data = ai_client.generate_summary(full_text)
+    
+    # Auto-generate crisp title if meeting has generic title
+    generic_titles = [
+        "Active Meeting Session", "Google Meet Session", "New Meeting", 
+        "Untitled Meeting", "Scheduled Meeting"
+    ]
+    if meeting.title in generic_titles or meeting.title.startswith("Meeting #"):
+        smart_title = ai_client.generate_meeting_title(full_text)
+        if smart_title:
+            meeting.title = smart_title
+            db.add(meeting)
+
     db_summary = Summary(
         meeting_id=meeting.id,
         key_points=summary_data.get("key_points"),

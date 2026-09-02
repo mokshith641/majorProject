@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
-import { BarChart3, TrendingUp, Cpu, Timer } from 'lucide-react';
+import { BarChart3, TrendingUp, Cpu, Timer, Sparkles, Lightbulb, CheckCircle2 } from 'lucide-react';
 import {
   ResponsiveContainer,
   AreaChart,
@@ -32,10 +32,18 @@ interface ActiveWindowShare {
   value: number;
 }
 
+interface AIInsights {
+  executive_summary: string;
+  key_themes: string[];
+  productivity_tips: string[];
+  team_sentiment: string;
+}
+
 interface AnalyticsData {
   totals: Totals;
   weekly_trends: TrendDay[];
   active_windows: ActiveWindowShare[];
+  ai_insights?: AIInsights;
 }
 
 export const Analytics: React.FC = () => {
@@ -110,6 +118,65 @@ export const Analytics: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* AI Executive Productivity Insights */}
+      {data?.ai_insights && (
+        <div className="glass-card p-6 rounded-2xl border border-indigo-500/20 bg-gradient-to-br from-indigo-950/20 via-slate-900/40 to-purple-950/20 shadow-xl space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-lg bg-indigo-600/20 text-indigo-400 border border-indigo-500/30">
+                <Sparkles className="h-4 w-4" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">AI Executive Productivity Insights</h3>
+                <p className="text-xs text-slate-400">Synthesized automatically from completed meeting transcripts and engagement telemetry.</p>
+              </div>
+            </div>
+            {data.ai_insights.team_sentiment && (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-300 border border-emerald-500/25">
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                {data.ai_insights.team_sentiment}
+              </span>
+            )}
+          </div>
+
+          <p className="text-sm text-slate-200 leading-relaxed">
+            {data.ai_insights.executive_summary}
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+            {/* Recurring Themes */}
+            <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 space-y-2">
+              <h4 className="text-xs font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
+                <span>Key Discussion Themes</span>
+              </h4>
+              <div className="flex flex-wrap gap-1.5">
+                {data.ai_insights.key_themes?.map((theme, i) => (
+                  <span key={i} className="text-xs bg-indigo-500/10 text-indigo-200 border border-indigo-500/20 px-2.5 py-1 rounded-md">
+                    {theme}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Recommendations */}
+            <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 space-y-2">
+              <h4 className="text-xs font-bold text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
+                <Lightbulb className="h-3.5 w-3.5 text-amber-400" />
+                <span>Productivity Recommendations</span>
+              </h4>
+              <ul className="space-y-1 text-xs text-slate-300">
+                {data.ai_insights.productivity_tips?.map((tip, i) => (
+                  <li key={i} className="flex items-start gap-1.5">
+                    <span className="text-amber-400">•</span>
+                    <span>{tip}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Detailed charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
