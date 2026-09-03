@@ -61,3 +61,17 @@ async def root():
 # Include routers
 from app.api.router import api_router
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
+
+@app.on_event("startup")
+def warmup_services():
+    """Pre-warm Whisper model in a background thread to prevent first-request cold start."""
+    import threading
+    def _warmup():
+        try:
+            from app.transcription.whisper_runner import transcriber
+            transcriber._load_model()
+            logger.info("Whisper model pre-warmed and resident in memory.")
+        except Exception as e:
+            logger.warning(f"Whisper warmup notice: {e}")
+    threading.Thread(target=_warmup, daemon=True).start()

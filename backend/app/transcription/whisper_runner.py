@@ -15,30 +15,31 @@ class WhisperTranscriber:
     
     def __init__(self):
         self.model: WhisperModel = None
-        self.model_name = settings.WHISPER_MODEL_NAME
-        self.device = settings.WHISPER_DEVICE
+        self.model_name = getattr(settings, "WHISPER_MODEL_NAME", "tiny.en")
+        self.device = getattr(settings, "WHISPER_DEVICE", "cpu")
 
     def _load_model(self):
-        """Lazy load the Whisper model into RAM/VRAM."""
+        """Load the Whisper model with multi-core CPU acceleration into RAM/VRAM."""
         if self.model is not None:
             return
             
         logger.info(f"Loading faster-whisper model '{self.model_name}' on '{self.device}'...")
         start_time = time.time()
         
-        # Determine correct compute type based on device
-        # For CPU: int8 or float32. For CUDA: float16 or int8_float16
-        compute_type = "int8" if self.device == "cpu" else "float16"
-        
-        # Download cache directory path inside workspace
+        compute_type = getattr(settings, "WHISPER_COMPUTE_TYPE", "int8") if self.device == "cpu" else "float16"
         download_root = "./whisper_models"
         os.makedirs(download_root, exist_ok=True)
+        
+        # Parallelize across available CPU threads
+        num_threads = min(8, max(2, (os.cpu_count() or 4) - 1))
         
         try:
             self.model = WhisperModel(
                 self.model_name,
                 device=self.device,
                 compute_type=compute_type,
+                cpu_threads=num_threads,
+                num_workers=2,
                 download_root=download_root
             )
             logger.info(f"Whisper model loaded in {time.time() - start_time:.2f} seconds.")
@@ -48,7 +49,7 @@ class WhisperTranscriber:
 
     def transcribe(self, file_path: str, participant_names: Optional[List[str]] = None) -> Tuple[str, List[Dict]]:
         """
-        Transcribe a WAV file.
+        Transcribe audio with accelerated greedy decoding and VAD filtering.
         Returns:
             - Full consolidated string transcript.
             - List of segments containing {"start", "end", "text", "speaker"}
@@ -59,16 +60,25 @@ class WhisperTranscriber:
             
         self._load_model()
         
-        logger.info(f"Starting transcription of: {file_path}")
+        logger.info(f"Starting accelerated transcription of: {file_path}")
         start_time = time.time()
         
         try:
             segments, info = self.model.transcribe(
                 file_path,
-                beam_size=5,
-                language="en",  # Defaulting to English, can be auto-detected
-                vad_filter=True,  # Voice Activity Detection to filter background noise
-                vad_parameters=dict(min_silence_duration_ms=500)
+                beam_size=1,                         # 1 = Greedy decoding (4x-6x faster than beam_size=5)
+                best_of=1,                           # Single candidate pass
+                temperature=0.0,                     # Zero retry loops on background noise
+                condition_on_previous_text=False,    # Prevents quadratic attention latency & loops
+                compression_ratio_threshold=2.4,
+                log_prob_threshold=-1.0,
+                no_speech_threshold=0.6,
+                vad_filter=True,                     # High-performance voice activity detection
+                vad_parameters=dict(
+                    min_silence_duration_ms=300,
+                    speech_pad_ms=150
+                ),
+                language="en"
             )
             
             full_text_list = []
@@ -87,7 +97,7 @@ class WhisperTranscriber:
                     "start": round(segment.start, 2),
                     "end": round(segment.end, 2),
                     "text": corrected_text,
-                    "speaker": "Speaker 1"  # Default speaker mapping
+                    "speaker": "Speaker 1"
                 })
                 
             full_text = " ".join(full_text_list)

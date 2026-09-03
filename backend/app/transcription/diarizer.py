@@ -128,7 +128,7 @@ def compute_silhouette_score(X: np.ndarray, labels: np.ndarray) -> float:
     return float(np.mean(silhouettes))
 
 
-def kmeans_cluster(X: np.ndarray, k: int, max_iters: int = 100) -> np.ndarray:
+def kmeans_cluster(X: np.ndarray, k: int, max_iters: int = 25) -> np.ndarray:
     """
     K-Means clustering implementation using pure NumPy.
     Returns:
@@ -188,17 +188,28 @@ class SpeakerDiarizer:
         """
         if not segments:
             return []
-            
+
+        # Fast path: Single designated participant or very few segments
+        if participant_names and len(participant_names) == 1:
+            for seg in segments:
+                seg["speaker"] = participant_names[0]
+            return segments
+
+        if len(segments) <= 2:
+            default_name = participant_names[0] if participant_names else "Speaker 1"
+            for seg in segments:
+                seg["speaker"] = default_name
+            return segments
+
         try:
-            # Determine target number of clusters (speakers)
-            # Search up to 6 speakers to automatically detect extra participants, or more if registered
-            max_k = max(6, len(participant_names) if participant_names else 2)
+            # Determine optimal target upper bound for speakers
+            max_k = min(4, len(participant_names) if (participant_names and len(participant_names) >= 2) else 3)
                 
             logger.info(f"Diarizing {len(segments)} segments. Upper bound speakers: {max_k}")
             
             # Extract features for all segments
             embeddings = []
-            valid_indices = [] # Indices of segments that are long/loud enough to cluster
+            valid_indices = []
             
             for idx, seg in enumerate(segments):
                 start = seg.get("start", 0.0)

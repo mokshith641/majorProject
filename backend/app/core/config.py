@@ -22,8 +22,10 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
 
     # Speech-to-Text Configurations
-    WHISPER_MODEL_NAME: str = "tiny"
+    WHISPER_MODEL_NAME: str = "tiny.en"
     WHISPER_DEVICE: str = "cpu"
+    WHISPER_COMPUTE_TYPE: str = "int8"
+    WHISPER_BEAM_SIZE: int = 1
 
     # Directory paths for storage
     UPLOAD_DIR: str = "./data/recordings"

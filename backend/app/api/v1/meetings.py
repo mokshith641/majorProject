@@ -483,8 +483,20 @@ async def upload_meeting_recording(
     )
     db.add(db_transcript)
 
-    # Groq summary
+    # Generate AI summary and smart title
     summary_data = ai_client.generate_summary(full_text)
+
+    # Auto-generate descriptive title if current title is generic
+    generic_titles = [
+        "Active Meeting Session", "Google Meet Session", "New Meeting",
+        "Untitled Meeting", "Scheduled Meeting"
+    ]
+    if meeting.title in generic_titles or meeting.title.startswith("Meeting #"):
+        smart_title = ai_client.generate_meeting_title(full_text)
+        if smart_title:
+            meeting.title = smart_title
+            db.add(meeting)
+
     db_summary = Summary(
         meeting_id=meeting.id,
         key_points=summary_data.get("key_points"),
