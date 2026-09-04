@@ -1,25 +1,122 @@
 @import "tailwindcss";
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Inter:wght@300;400;500;600;700&display=swap');
 
-body {
-  @apply bg-[#090D16] text-slate-100 font-sans antialiased overflow-x-hidden;
+/* Google Meet Theme Variables */
+:root {
+  --bg-app: #f8fafd;
+  --bg-surface: #ffffff;
+  --bg-surface-hover: #f1f3f4;
+  --bg-card: #ffffff;
+  --bg-card-secondary: #f8fafd;
+  --bg-input: #ffffff;
+  --border-subtle: #e8eaed;
+  --border-strong: #dadce0;
+  --text-primary: #202124;
+  --text-secondary: #5f6368;
+  --text-muted: #80868b;
+  --color-brand: #1a73e8;
+  --color-brand-hover: #1967d2;
+  --color-brand-light: #e8f0fe;
+  --color-brand-text: #174ea6;
+  --shadow-card: 0 1px 3px 0 rgba(60, 64, 67, 0.08), 0 2px 6px 2px rgba(60, 64, 67, 0.04);
+  --shadow-dropdown: 0 4px 12px 0 rgba(60, 64, 67, 0.15);
+  --scrollbar-track: #f1f3f4;
+  --scrollbar-thumb: #dadce0;
+  --scrollbar-thumb-hover: #1a73e8;
 }
 
-/* Custom premium visual style classes */
+.dark, [data-theme="dark"] {
+  --bg-app: #0f141c;
+  --bg-surface: #182030;
+  --bg-surface-hover: #222d42;
+  --bg-card: #182030;
+  --bg-card-secondary: #121824;
+  --bg-input: #121824;
+  --border-subtle: #222f47;
+  --border-strong: #2e3e5c;
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --color-brand: #3b82f6;
+  --color-brand-hover: #2563eb;
+  --color-brand-light: rgba(59, 130, 246, 0.15);
+  --color-brand-text: #60a5fa;
+  --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.3);
+  --shadow-dropdown: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --scrollbar-track: #0f141c;
+  --scrollbar-thumb: #27354a;
+  --scrollbar-thumb-hover: #3b82f6;
+}
+
+body {
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  overflow-x: hidden;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Glass and Surface Components with dynamic theme adaptation */
 .glass-panel {
-  background: rgba(17, 24, 39, 0.7);
+  background-color: var(--bg-surface);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-subtle);
+  transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
 .glass-card {
-  background: rgba(17, 24, 39, 0.55);
+  background-color: var(--bg-card);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-card);
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* Explicit theme utilities */
+.app-bg {
+  background-color: var(--bg-app);
+}
+
+.app-surface {
+  background-color: var(--bg-surface);
+}
+
+.app-card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-card);
+}
+
+.app-border {
+  border-color: var(--border-subtle);
+}
+
+.app-text {
+  color: var(--text-primary);
+}
+
+.app-text-secondary {
+  color: var(--text-secondary);
+}
+
+.app-text-muted {
+  color: var(--text-muted);
+}
+
+.app-input {
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-strong);
+  color: var(--text-primary);
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.app-input:focus {
+  border-color: var(--color-brand);
+  box-shadow: 0 0 0 3px var(--color-brand-light);
 }
 
 .glow-btn {
@@ -35,7 +132,7 @@ body {
   left: 0;
   width: 100%;
   height: 100%;
-  background: radial-gradient(circle, rgba(99, 102, 241, 0.3) 0%, transparent 70%);
+  background: radial-gradient(circle, var(--color-brand-light) 0%, transparent 70%);
   opacity: 0;
   transition: opacity 0.3s ease;
   pointer-events: none;
@@ -52,16 +149,16 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #090D16;
+  background: var(--scrollbar-track);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1F2937;
+  background: var(--scrollbar-thumb);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #4F46E5;
+  background: var(--scrollbar-thumb-hover);
 }
 
 /* Live pulse animation */

@@ -40,31 +40,31 @@ export const SearchAssistant: React.FC = () => {
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       <div className="text-center space-y-2 mb-8">
-        <h2 className="text-2xl font-bold text-white flex items-center justify-center gap-2">
-          <Brain className="h-6 w-6 text-indigo-400" />
+        <h2 className="text-2xl font-bold text-[var(--text-primary)] flex items-center justify-center gap-2">
+          <Brain className="h-6 w-6 text-[#1a73e8] dark:text-blue-400" />
           AI Meeting Search Assistant
         </h2>
-        <p className="text-slate-400 text-sm">
+        <p className="text-[var(--text-secondary)] text-sm">
           Ask questions across all historical meeting transcripts with intelligent neural retrieval.
         </p>
       </div>
 
       {/* Input Form Box */}
-      <form onSubmit={handleSearch} className="flex gap-2">
+      <form onSubmit={handleSearch} className="flex gap-2.5">
         <div className="relative flex-1">
-          <Search className="absolute left-3.5 top-3.5 h-4 w-4 text-slate-500" />
+          <Search className="absolute left-3.5 top-3.5 h-4 w-4 text-[var(--text-muted)]" />
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="e.g., 'What decisions were made about database schemas?'"
-            className="w-full bg-slate-900 border border-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-white rounded-xl pl-10 pr-4 py-3 text-sm outline-none transition-all"
+            className="w-full bg-[var(--bg-card)] border border-[var(--border-strong)] focus:border-[#1a73e8] text-[var(--text-primary)] rounded-xl pl-10 pr-4 py-3 text-sm outline-none transition-all shadow-xs"
           />
         </div>
         <button
           type="submit"
           disabled={isSearching}
-          className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-700/50 text-white font-semibold px-6 py-3 rounded-xl shadow-lg transition-all text-sm flex items-center gap-2 shrink-0"
+          className="bg-[#1a73e8] hover:bg-[#1967d2] disabled:opacity-50 text-white font-medium px-6 py-3 rounded-xl shadow-xs hover:shadow-md transition-all text-sm flex items-center gap-2 shrink-0 cursor-pointer"
         >
           {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Query'}
         </button>
@@ -72,41 +72,41 @@ export const SearchAssistant: React.FC = () => {
 
       {/* Results Box */}
       {isSearching && (
-        <div className="glass-card p-8 rounded-xl border border-slate-800 text-center space-y-3">
-          <Loader2 className="h-8 w-8 text-indigo-400 animate-spin mx-auto" />
-          <p className="text-slate-400 text-sm">Searching historical transcripts and generating answer...</p>
+        <div className="glass-card p-8 rounded-2xl text-center space-y-3">
+          <Loader2 className="h-8 w-8 text-[#1a73e8] dark:text-blue-400 animate-spin mx-auto" />
+          <p className="text-[var(--text-secondary)] text-sm">Searching historical transcripts and generating answer...</p>
         </div>
       )}
 
       {!isSearching && result && (
         <div className="space-y-6 animate-fade-in">
           {/* Answer Card */}
-          <div className="glass-card p-6 rounded-xl border border-slate-800 space-y-4">
-            <h3 className="text-sm font-bold text-indigo-400 flex items-center gap-2 uppercase tracking-wider">
+          <div className="glass-card p-6 rounded-2xl space-y-4">
+            <h3 className="text-xs font-bold text-[#1a73e8] dark:text-blue-400 flex items-center gap-2 uppercase tracking-wider">
               AI Answer
             </h3>
-            <p className="text-slate-200 text-sm leading-relaxed whitespace-pre-line">
+            <p className="text-[var(--text-primary)] text-sm leading-relaxed whitespace-pre-line">
               {result.answer}
             </p>
           </div>
 
           {/* Citations Card */}
           {result.citations.length > 0 && (
-            <div className="glass-card p-5 rounded-xl border border-slate-800 space-y-3">
-              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest">
+            <div className="glass-card p-5 rounded-2xl space-y-3">
+              <h4 className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-widest">
                 Source Citations
               </h4>
-              <div className="divide-y divide-slate-800/60">
+              <div className="divide-y divide-[var(--border-subtle)]">
                 {result.citations.map((cite, idx) => (
-                  <div key={idx} className="py-2.5 flex items-center justify-between text-sm">
-                    <span className="flex items-center gap-2 text-slate-300">
-                      <CornerDownRight className="h-4 w-4 text-slate-500" />
+                  <div key={idx} className="py-3 flex items-center justify-between text-sm">
+                    <span className="flex items-center gap-2 text-[var(--text-primary)]">
+                      <CornerDownRight className="h-4 w-4 text-[var(--text-muted)]" />
                       {cite.title}
-                      <span className="text-slate-500 text-xs font-mono font-medium">({cite.date})</span>
+                      <span className="text-[var(--text-muted)] text-xs font-mono">({cite.date})</span>
                     </span>
                     <Link
                       to={`/meetings/${cite.meeting_id}`}
-                      className="text-xs text-indigo-400 hover:text-indigo-300 inline-flex items-center gap-1 font-semibold transition-colors"
+                      className="text-xs text-[#1a73e8] hover:text-[#1967d2] inline-flex items-center gap-1 font-semibold transition-colors"
                     >
                       Inspect Source
                       <ArrowRight className="h-3 w-3" />

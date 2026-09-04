@@ -20,7 +20,6 @@ export const Register: React.FC = () => {
   const [success, setSuccess] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Preserve navigation path
   const from = (location.state as any)?.from;
 
   const {
@@ -53,23 +52,23 @@ export const Register: React.FC = () => {
   };
 
   return (
-    <div className="w-full max-w-md glass-card rounded-2xl p-8 shadow-2xl relative overflow-hidden border border-slate-800">
-      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-indigo-600"></div>
+    <div className="w-full max-w-md glass-card rounded-2xl p-8 shadow-xl relative overflow-hidden">
+      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#1a73e8] via-[#34a853] to-[#fbbc05]"></div>
 
       <div className="mb-8 text-center">
-        <h2 className="text-2xl font-bold text-white mb-2">Create Account</h2>
-        <p className="text-slate-400 text-sm">Register to start managing meeting telemetry</p>
+        <h2 className="text-2xl font-bold text-[var(--text-primary)] mb-2">Create Account</h2>
+        <p className="text-[var(--text-secondary)] text-sm">Register to start managing meeting telemetry</p>
       </div>
 
       {success && (
-        <div className="flex items-center gap-2 bg-emerald-950/20 border border-emerald-500/30 text-emerald-300 p-4 rounded-lg text-sm mb-6 animate-pulse">
-          <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+        <div className="flex items-center gap-2 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30 p-4 rounded-xl text-sm mb-6">
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
           <span>Registration successful! Redirecting to login...</span>
         </div>
       )}
 
       {errorMsg && (
-        <div className="flex items-center gap-2 bg-red-950/20 border border-red-500/30 text-red-300 p-3 rounded-lg text-sm mb-6">
+        <div className="flex items-center gap-2 bg-rose-50 text-rose-700 dark:bg-rose-950/20 dark:text-rose-300 border border-rose-200 dark:border-rose-900/50 p-3.5 rounded-xl text-sm mb-6">
           <AlertCircle className="h-4 w-4 shrink-0" />
           <span>{errorMsg}</span>
         </div>
@@ -77,27 +76,27 @@ export const Register: React.FC = () => {
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         <div>
-          <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+          <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-1.5">
             Full Name
           </label>
           <div className="relative">
-            <User className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
+            <User className="absolute left-3.5 top-3.5 h-4 w-4 text-[var(--text-muted)]" />
             <input
               type="text"
               {...register('name', { required: 'Full name is required' })}
               placeholder="Moksh"
-              className="w-full bg-[#090D16] border border-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-white rounded-lg pl-10 pr-4 py-2.5 text-sm transition-all outline-none"
+              className="w-full bg-[var(--bg-input)] border border-[var(--border-strong)] focus:border-[#1a73e8] text-[var(--text-primary)] rounded-xl pl-10 pr-4 py-2.5 text-sm transition-all outline-none"
             />
           </div>
-          {errors.name && <p className="text-red-400 text-xs mt-1">{errors.name.message}</p>}
+          {errors.name && <p className="text-rose-600 dark:text-rose-400 text-xs mt-1">{errors.name.message}</p>}
         </div>
 
         <div>
-          <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+          <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-1.5">
             Email Address
           </label>
           <div className="relative">
-            <Mail className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
+            <Mail className="absolute left-3.5 top-3.5 h-4 w-4 text-[var(--text-muted)]" />
             <input
               type="email"
               {...register('email', {
@@ -108,18 +107,18 @@ export const Register: React.FC = () => {
                 },
               })}
               placeholder="moksh@example.com"
-              className="w-full bg-[#090D16] border border-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-white rounded-lg pl-10 pr-4 py-2.5 text-sm transition-all outline-none"
+              className="w-full bg-[var(--bg-input)] border border-[var(--border-strong)] focus:border-[#1a73e8] text-[var(--text-primary)] rounded-xl pl-10 pr-4 py-2.5 text-sm transition-all outline-none"
             />
           </div>
-          {errors.email && <p className="text-red-400 text-xs mt-1">{errors.email.message}</p>}
+          {errors.email && <p className="text-rose-600 dark:text-rose-400 text-xs mt-1">{errors.email.message}</p>}
         </div>
 
         <div>
-          <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+          <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-1.5">
             Password (Min 6 chars)
           </label>
           <div className="relative">
-            <Lock className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
+            <Lock className="absolute left-3.5 top-3.5 h-4 w-4 text-[var(--text-muted)]" />
             <input
               type="password"
               {...register('password', {
@@ -127,19 +126,19 @@ export const Register: React.FC = () => {
                 minLength: { value: 6, message: 'Password must be at least 6 characters' },
               })}
               placeholder="••••••••"
-              className="w-full bg-[#090D16] border border-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-white rounded-lg pl-10 pr-4 py-2.5 text-sm transition-all outline-none"
+              className="w-full bg-[var(--bg-input)] border border-[var(--border-strong)] focus:border-[#1a73e8] text-[var(--text-primary)] rounded-xl pl-10 pr-4 py-2.5 text-sm transition-all outline-none"
             />
           </div>
-          {errors.password && <p className="text-red-400 text-xs mt-1">{errors.password.message}</p>}
+          {errors.password && <p className="text-rose-600 dark:text-rose-400 text-xs mt-1">{errors.password.message}</p>}
         </div>
 
         <div>
-          <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+          <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-1.5">
             Platform Role
           </label>
           <select
             {...register('role')}
-            className="w-full bg-[#090D16] border border-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-white rounded-lg px-3 py-2.5 text-sm transition-all outline-none cursor-pointer"
+            className="w-full bg-[var(--bg-input)] border border-[var(--border-strong)] focus:border-[#1a73e8] text-[var(--text-primary)] rounded-xl px-3.5 py-2.5 text-sm transition-all outline-none cursor-pointer"
           >
             <option value="user">Standard User</option>
             <option value="admin">Administrator</option>
@@ -149,7 +148,7 @@ export const Register: React.FC = () => {
         <button
           type="submit"
           disabled={isSubmitting || success}
-          className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-700/50 text-white font-medium rounded-lg shadow-lg hover:shadow-indigo-600/10 transition-all text-sm flex items-center justify-center gap-2 mt-6"
+          className="w-full py-3 bg-[#1a73e8] hover:bg-[#1967d2] disabled:opacity-50 text-white font-medium rounded-xl shadow-xs hover:shadow-md transition-all text-sm flex items-center justify-center gap-2 mt-6 cursor-pointer"
         >
           {isSubmitting ? (
             <>
@@ -162,9 +161,9 @@ export const Register: React.FC = () => {
         </button>
       </form>
 
-      <div className="mt-8 text-center text-sm text-slate-400">
+      <div className="mt-8 text-center text-sm text-[var(--text-secondary)]">
         Already have an account?{' '}
-        <Link to={PATHS.LOGIN} state={{ from }} className="text-indigo-400 hover:text-indigo-300 font-medium transition-colors">
+        <Link to={PATHS.LOGIN} state={{ from }} className="text-[#1a73e8] hover:text-[#1967d2] font-semibold transition-colors">
           Sign In
         </Link>
       </div>

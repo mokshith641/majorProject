@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import { useTheme } from '../contexts/ThemeContext';
 import {
   Mic,
   MicOff,
@@ -28,7 +29,9 @@ import {
   Send,
   Monitor,
   Keyboard,
-  MousePointerClick
+  MousePointerClick,
+  Sun,
+  Moon
 } from 'lucide-react';
 
 interface LiveCaptionEvent {
@@ -50,6 +53,7 @@ export const LiveMeeting: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   
   // Meeting metadata
   const [meetingTitle, setMeetingTitle] = useState('Google Meet Session');
@@ -632,6 +636,14 @@ export const LiveMeeting: React.FC = () => {
             <Radio className={`h-3 w-3 ${wsConnected ? 'text-emerald-400 animate-pulse' : 'text-amber-400'}`} />
             <span>{formatDuration(secondsElapsed)}</span>
           </div>
+
+          <button
+            onClick={toggleTheme}
+            className="p-2 text-slate-400 hover:text-white hover:bg-[#3c4043] rounded-full transition-colors cursor-pointer"
+            title={theme === 'light' ? 'Switch to Dark mode' : 'Switch to Light mode'}
+          >
+            {theme === 'light' ? <Moon className="h-4 w-4 text-slate-300" /> : <Sun className="h-4 w-4 text-amber-400" />}
+          </button>
 
           <button
             onClick={toggleFullscreen}

@@ -45,7 +45,7 @@ export const MeetingHistory: React.FC = () => {
   if (isLoading) {
     return (
       <div className="flex h-[60vh] items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-indigo-500 border-t-transparent"></div>
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#1a73e8] border-t-transparent"></div>
       </div>
     );
   }
@@ -54,12 +54,12 @@ export const MeetingHistory: React.FC = () => {
     <div className="space-y-6 max-w-7xl mx-auto">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-white">Meeting Archive</h2>
-          <p className="text-slate-400 text-sm">Browse, search, and inspect past discussions and summaries.</p>
+          <h2 className="text-2xl font-bold text-[var(--text-primary)]">Meeting Archive</h2>
+          <p className="text-[var(--text-secondary)] text-sm">Browse, search, and inspect past discussions and summaries.</p>
         </div>
         <Link
           to={PATHS.CREATE_MEETING}
-          className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-4 py-2.5 rounded-lg shadow-lg transition-all text-sm self-start"
+          className="flex items-center gap-2 bg-[#1a73e8] hover:bg-[#1967d2] text-white font-medium px-4 py-2.5 rounded-xl shadow-xs hover:shadow-md transition-all text-sm self-start cursor-pointer"
         >
           <Video className="h-4 w-4" />
           New Meeting
@@ -68,19 +68,19 @@ export const MeetingHistory: React.FC = () => {
 
       {/* Search Input Bar */}
       <div className="relative max-w-md">
-        <Search className="absolute left-3.5 top-3 h-4 w-4 text-slate-500" />
+        <Search className="absolute left-3.5 top-3 h-4 w-4 text-[var(--text-muted)]" />
         <input
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search meetings by title..."
-          className="w-full bg-slate-900 border border-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-white rounded-lg pl-10 pr-4 py-2.5 text-sm transition-all outline-none"
+          className="w-full bg-[var(--bg-card)] border border-[var(--border-strong)] focus:border-[#1a73e8] text-[var(--text-primary)] rounded-xl pl-10 pr-4 py-2.5 text-sm transition-all outline-none"
         />
       </div>
 
       {/* Grid List */}
       {filteredMeetings.length === 0 ? (
-        <div className="glass-card text-center py-16 text-slate-500 text-sm rounded-xl">
+        <div className="glass-card text-center py-16 text-[var(--text-secondary)] text-sm rounded-2xl">
           No matching meetings found.
         </div>
       ) : (
@@ -88,27 +88,27 @@ export const MeetingHistory: React.FC = () => {
           {filteredMeetings.map((meeting) => (
             <div
               key={meeting.id}
-              className="glass-card p-6 rounded-xl border border-slate-800 flex flex-col justify-between hover:border-slate-700/80 transition-all hover:shadow-lg hover:shadow-indigo-500/[0.02]"
+              className="glass-card p-6 rounded-2xl flex flex-col justify-between hover:border-[var(--border-strong)] transition-all hover:shadow-md"
             >
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-slate-500 font-semibold font-mono">ID: #{meeting.id}</span>
-                  <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                  <span className="text-[10px] text-[var(--text-muted)] font-semibold font-mono">ID: #{meeting.id}</span>
+                  <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase ${
                     meeting.status === 'completed'
-                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800'
                       : meeting.status === 'ongoing'
-                      ? 'bg-red-500/10 text-red-400 border border-red-500/20'
-                      : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'
+                      ? 'bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-400 dark:border-rose-800'
+                      : 'bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/40 dark:text-blue-400 dark:border-blue-800'
                   }`}>
                     {meeting.status}
                   </span>
                 </div>
 
-                <h3 className="text-base font-bold text-white line-clamp-1">{meeting.title}</h3>
+                <h3 className="text-base font-bold text-[var(--text-primary)] line-clamp-1">{meeting.title}</h3>
                 
-                <div className="flex flex-col gap-2 text-xs text-slate-400 pt-1">
+                <div className="flex flex-col gap-2 text-xs text-[var(--text-secondary)] pt-1">
                   <span className="flex items-center gap-1.5">
-                    <Calendar className="h-3.5 w-3.5 text-slate-500" />
+                    <Calendar className="h-3.5 w-3.5 text-[var(--text-muted)]" />
                     {new Date(meeting.date).toLocaleDateString(undefined, {
                       month: 'short',
                       day: 'numeric',
@@ -116,14 +116,14 @@ export const MeetingHistory: React.FC = () => {
                     })}
                   </span>
                   <span className="flex items-center gap-1.5">
-                    <Clock className="h-3.5 w-3.5 text-slate-500" />
+                    <Clock className="h-3.5 w-3.5 text-[var(--text-muted)]" />
                     {formatDuration(meeting.duration_seconds)}
                   </span>
                   {meeting.focus_score !== undefined && (
                     <span className="flex items-center gap-1.5 font-medium">
-                      <Activity className="h-3.5 w-3.5 text-indigo-400" />
+                      <Activity className="h-3.5 w-3.5 text-[#1a73e8] dark:text-blue-400" />
                       Focus Level:{' '}
-                      <strong className={meeting.focus_score >= 80 ? 'text-emerald-400' : 'text-amber-400'}>
+                      <strong className={meeting.focus_score >= 80 ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}>
                         {meeting.focus_score}%
                       </strong>
                     </span>
@@ -131,10 +131,10 @@ export const MeetingHistory: React.FC = () => {
                 </div>
               </div>
 
-              <div className="mt-6 pt-4 border-t border-slate-800/80 flex justify-end">
+              <div className="mt-6 pt-4 border-t border-[var(--border-subtle)] flex justify-end">
                 <Link
                   to={meeting.status === 'ongoing' ? `/meetings/${meeting.id}/live` : `/meetings/${meeting.id}`}
-                  className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold inline-flex items-center gap-1 transition-colors"
+                  className="text-xs text-[#1a73e8] hover:text-[#1967d2] font-semibold inline-flex items-center gap-1 transition-colors"
                 >
                   View Details
                   <ArrowRight className="h-3.5 w-3.5" />

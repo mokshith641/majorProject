@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
-import { Save, Settings as SettingsIcon, ShieldKeyhole, Loader2, CheckCircle2 } from 'lucide-react';
+import { useTheme } from '../contexts/ThemeContext';
+import { Save, Settings as SettingsIcon, ShieldKeyhole, Loader2, CheckCircle2, Sun, Moon, Check } from 'lucide-react';
 
 export const Settings: React.FC = () => {
-  const [theme, setTheme] = useState('dark');
+  const { theme, setTheme: setGlobalTheme } = useTheme();
+  const [selectedTheme, setSelectedTheme] = useState<'light' | 'dark'>(theme);
   const [audioDevice, setAudioDevice] = useState('');
   const [videoDevice, setVideoDevice] = useState('');
   const [groqKey, setGroqKey] = useState('');
@@ -15,17 +17,24 @@ export const Settings: React.FC = () => {
     const fetchSettings = async () => {
       try {
         const res = await api.get('/settings/');
-        setTheme(res.data.theme || 'dark');
+        if (res.data.theme === 'light' || res.data.theme === 'dark') {
+          setSelectedTheme(res.data.theme);
+          setGlobalTheme(res.data.theme);
+        }
         setAudioDevice(res.data.audio_device || '');
         setVideoDevice(res.data.video_device || '');
-        // The API returns masked keys, we don't overwrite if present
         setGroqKey(res.data.api_keys?.groq_api_key ? '***' : '');
       } catch (err) {
         console.error("Failed to load settings:", err);
       }
     };
     fetchSettings();
-  }, []);
+  }, [setGlobalTheme]);
+
+  const handleThemeChange = (newTheme: 'light' | 'dark') => {
+    setSelectedTheme(newTheme);
+    setGlobalTheme(newTheme);
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,7 +43,7 @@ export const Settings: React.FC = () => {
 
     try {
       const payload: any = {
-        theme,
+        theme: selectedTheme,
         audio_device: audioDevice,
         video_device: videoDevice,
       };
@@ -59,48 +68,91 @@ export const Settings: React.FC = () => {
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       <div className="flex items-center gap-3">
-        <div className="h-10 w-10 bg-indigo-500/10 text-indigo-400 rounded-lg flex items-center justify-center">
+        <div className="h-10 w-10 bg-[#e8f0fe] text-[#1a73e8] dark:bg-blue-900/30 dark:text-blue-400 rounded-lg flex items-center justify-center">
           <SettingsIcon className="h-5 w-5" />
         </div>
         <div>
-          <h2 className="text-xl font-bold text-white">System Settings</h2>
-          <p className="text-slate-400 text-sm">Configure hardware inputs and authorization API tokens</p>
+          <h2 className="text-xl font-bold text-[var(--text-primary)]">System Settings</h2>
+          <p className="text-[var(--text-secondary)] text-sm">Customize visual themes, hardware inputs, and AI credentials</p>
         </div>
       </div>
 
       {success && (
-        <div className="flex items-center gap-2 bg-emerald-950/20 border border-emerald-500/30 text-emerald-300 p-4 rounded-lg text-sm">
-          <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-          <span>Configurations updated successfully!</span>
+        <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 p-4 rounded-xl text-sm">
+          <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+          <span>Configurations updated and saved successfully!</span>
         </div>
       )}
 
-      <form onSubmit={handleSave} className="glass-card rounded-xl p-8 border border-slate-800 space-y-6">
-        {/* Theme Settings */}
-        <div className="space-y-2">
-          <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
-            UI Theme Mode
+      <form onSubmit={handleSave} className="glass-card rounded-2xl p-6 sm:p-8 space-y-6">
+        {/* Visual Theme Customization Cards */}
+        <div className="space-y-3">
+          <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+            UI Theme Customization
           </label>
-          <select
-            value={theme}
-            onChange={(e) => setTheme(e.target.value)}
-            className="w-full bg-[#090D16] border border-slate-800 focus:border-indigo-500 text-white rounded-lg px-3 py-2.5 text-sm outline-none cursor-pointer"
-          >
-            <option value="dark">Dark Theme (Default)</option>
-            <option value="light">Light Theme</option>
-          </select>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            {/* Light Theme Card */}
+            <div
+              onClick={() => handleThemeChange('light')}
+              className={`p-4 rounded-xl border-2 cursor-pointer transition-all flex items-start gap-3.5 ${
+                selectedTheme === 'light'
+                  ? 'border-[#1a73e8] bg-[#e8f0fe]/40 shadow-xs'
+                  : 'border-[var(--border-subtle)] hover:border-[var(--border-strong)] bg-[var(--bg-surface)]'
+              }`}
+            >
+              <div className="h-10 w-10 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-amber-500 shadow-xs shrink-0">
+                <Sun className="h-5 w-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-semibold text-slate-900">Google Meet Light</h4>
+                  {selectedTheme === 'light' && (
+                    <span className="h-5 w-5 rounded-full bg-[#1a73e8] text-white flex items-center justify-center text-xs">
+                      <Check className="h-3 w-3" />
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 mt-1">Clean off-white canvas with Google Blue accents</p>
+              </div>
+            </div>
+
+            {/* Dark Theme Card */}
+            <div
+              onClick={() => handleThemeChange('dark')}
+              className={`p-4 rounded-xl border-2 cursor-pointer transition-all flex items-start gap-3.5 ${
+                selectedTheme === 'dark'
+                  ? 'border-[#3b82f6] bg-blue-950/20 shadow-xs'
+                  : 'border-[var(--border-subtle)] hover:border-[var(--border-strong)] bg-[var(--bg-surface)]'
+              }`}
+            >
+              <div className="h-10 w-10 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center text-indigo-400 shadow-xs shrink-0">
+                <Moon className="h-5 w-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-semibold text-[var(--text-primary)]">Dark Slate</h4>
+                  {selectedTheme === 'dark' && (
+                    <span className="h-5 w-5 rounded-full bg-[#3b82f6] text-white flex items-center justify-center text-xs">
+                      <Check className="h-3 w-3" />
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-[var(--text-secondary)] mt-1">Sleek low-light contrast for low eye strain</p>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Hardware Devices */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
           <div className="space-y-2">
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+            <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
               Input Microphone
             </label>
             <select
               value={audioDevice}
               onChange={(e) => setAudioDevice(e.target.value)}
-              className="w-full bg-[#090D16] border border-slate-800 text-white rounded-lg px-3 py-2.5 text-sm outline-none"
+              className="w-full bg-[var(--bg-input)] border border-[var(--border-strong)] text-[var(--text-primary)] rounded-lg px-3.5 py-2.5 text-sm outline-none focus:border-[#1a73e8] transition-colors"
             >
               <option value="">Default Microphone</option>
               <option value="built_in">Internal Array Mic</option>
@@ -109,13 +161,13 @@ export const Settings: React.FC = () => {
           </div>
 
           <div className="space-y-2">
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+            <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
               Engagement Webcam
             </label>
             <select
               value={videoDevice}
               onChange={(e) => setVideoDevice(e.target.value)}
-              className="w-full bg-[#090D16] border border-slate-800 text-white rounded-lg px-3 py-2.5 text-sm outline-none"
+              className="w-full bg-[var(--bg-input)] border border-[var(--border-strong)] text-[var(--text-primary)] rounded-lg px-3.5 py-2.5 text-sm outline-none focus:border-[#1a73e8] transition-colors"
             >
               <option value="">Default Camera</option>
               <option value="integrated">Integrated HD Camera</option>
@@ -125,14 +177,14 @@ export const Settings: React.FC = () => {
         </div>
 
         {/* API Credentials */}
-        <div className="space-y-4 border-t border-slate-800/80 pt-6">
-          <h3 className="text-sm font-bold text-white flex items-center gap-2">
-            <ShieldKeyhole className="h-4 w-4 text-indigo-400" />
+        <div className="space-y-4 border-t border-[var(--border-subtle)] pt-6">
+          <h3 className="text-sm font-bold text-[var(--text-primary)] flex items-center gap-2">
+            <ShieldKeyhole className="h-4 w-4 text-[#1a73e8] dark:text-blue-400" />
             AI Developer Credentials
           </h3>
           
           <div className="space-y-2">
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+            <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
               Groq Cloud API Key
             </label>
             <input
@@ -140,9 +192,9 @@ export const Settings: React.FC = () => {
               value={groqKey}
               onChange={(e) => setGroqKey(e.target.value)}
               placeholder="e.g. gsk_..."
-              className="w-full bg-[#090D16] border border-slate-800 focus:border-indigo-500 text-white rounded-lg px-4 py-2.5 text-sm outline-none transition-all"
+              className="w-full bg-[var(--bg-input)] border border-[var(--border-strong)] text-[var(--text-primary)] rounded-lg px-4 py-2.5 text-sm outline-none focus:border-[#1a73e8] transition-colors"
             />
-            <p className="text-[10px] text-slate-500 leading-normal">
+            <p className="text-[11px] text-[var(--text-muted)] leading-normal">
               Used to query Llama 3.1 8B Instant. You can retrieve a free developer key from console.groq.com.
             </p>
           </div>
@@ -151,7 +203,7 @@ export const Settings: React.FC = () => {
         <button
           type="submit"
           disabled={isSaving}
-          className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-700/50 text-white font-semibold rounded-lg shadow-lg transition-all text-sm flex items-center justify-center gap-2"
+          className="w-full py-3 bg-[#1a73e8] hover:bg-[#1967d2] disabled:opacity-50 text-white font-medium rounded-xl shadow-sm hover:shadow-md transition-all text-sm flex items-center justify-center gap-2 cursor-pointer"
         >
           {isSaving ? (
             <>
