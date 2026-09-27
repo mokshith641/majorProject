@@ -39,6 +39,8 @@ interface LiveCaptionEvent {
   text: string;
   isInterim: boolean;
   timestamp?: string;
+  color?: string;
+  user_id?: number;
 }
 
 interface ChatMessage {
@@ -47,12 +49,23 @@ interface ChatMessage {
   text: string;
   time: string;
   isSystem?: boolean;
+  color?: string;
+}
+
+// Live participant tracked via WebSocket
+interface LiveParticipant {
+  user_id: number;
+  name: string;
+  color: string;
+  isMuted?: boolean;
+  handRaised?: boolean;
+  isLocal?: boolean;
 }
 
 export const LiveMeeting: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const { theme, toggleTheme } = useTheme();
   
   // Meeting metadata
@@ -77,6 +90,11 @@ export const LiveMeeting: React.FC = () => {
   const [isHearingSpeech, setIsHearingSpeech] = useState(false);
   const [speechApiSupported, setSpeechApiSupported] = useState(true);
   const [captionSize, setCaptionSize] = useState<'normal' | 'large'>('normal');
+
+  // Multi-user: live participants in the meeting room
+  const [liveParticipants, setLiveParticipants] = useState<LiveParticipant[]>([]);
+  const [myColor, setMyColor] = useState<string>('#8ab4f8');
+  const [myUserId, setMyUserId] = useState<number>(0);
 
   // Side Drawer state
   const [chatInput, setChatInput] = useState('');
@@ -109,6 +127,7 @@ export const LiveMeeting: React.FC = () => {
 
   const isHost = user && hostId ? user.id === hostId : true;
   const currentSpeakerName = user?.full_name || user?.email?.split('@')[0] || (isHost ? 'Host' : 'Participant');
+
 
   // Format digital clock time (HH:MM AM/PM)
   const [currentTimeStr, setCurrentTimeStr] = useState('');
@@ -289,11 +308,13 @@ export const LiveMeeting: React.FC = () => {
     };
   }, []);
 
-  // 5. WebSocket connection for multi-user captions and chat
+  // 5. WebSocket connection for multi-user captions, participants, and hand-raise events
   useEffect(() => {
     if (!id) return;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.hostname}:8000/api/v1/meetings/${id}/ws`;
+    // Pass JWT token as query param so backend can authenticate & assign identity+color
+    const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+    const wsUrl = `${protocol}//${window.location.hostname}:8000/api/v1/meetings/${id}/ws${tokenParam}`;
 
     let ws: WebSocket;
     try {
@@ -307,22 +328,94 @@ export const LiveMeeting: React.FC = () => {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          if (data.type === 'caption') {
+
+          // ── Server assigns our identity and color on connect ──
+          if (data.type === 'participants_list') {
+            const serverParticipants: LiveParticipant[] = data.participants || [];
+            if (data.your_color) setMyColor(data.your_color);
+            if (data.your_user_id) setMyUserId(data.your_user_id);
+            // Merge: mark the current user's entry as local
+            setLiveParticipants(
+              serverParticipants.map(p => ({
+                ...p,
+                isLocal: p.user_id === data.your_user_id
+              }))
+            );
+          }
+
+          // ── Another participant joined ──
+          else if (data.type === 'participant_joined') {
+            const joined = data as { user_id: number; name: string; color: string; participants?: LiveParticipant[] };
+            if (joined.participants) {
+              setLiveParticipants(prev => {
+                const myId = myUserId || (data.your_user_id ?? 0);
+                return (joined.participants as LiveParticipant[]).map(p => ({
+                  ...p,
+                  isLocal: p.user_id === myId
+                }));
+              });
+            }
+            // System notification in chat
+            const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            setChatMessages(prev => [
+              ...prev,
+              {
+                id: `join-${Date.now()}`,
+                speaker: 'System',
+                text: `${joined.name} joined the meeting`,
+                time: timeStr,
+                isSystem: true
+              }
+            ]);
+          }
+
+          // ── A participant left ──
+          else if (data.type === 'participant_left') {
+            const left = data as { user_id: number; name: string; participants?: LiveParticipant[] };
+            if (left.participants) {
+              setLiveParticipants(prev => {
+                const myId = myUserId;
+                return (left.participants as LiveParticipant[]).map(p => ({
+                  ...p,
+                  isLocal: p.user_id === myId
+                }));
+              });
+            } else {
+              setLiveParticipants(prev => prev.filter(p => p.user_id !== left.user_id));
+            }
+            const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            setChatMessages(prev => [
+              ...prev,
+              {
+                id: `leave-${Date.now()}`,
+                speaker: 'System',
+                text: `${left.name} left the meeting`,
+                time: timeStr,
+                isSystem: true
+              }
+            ]);
+          }
+
+          // ── Live caption from any participant ──
+          else if (data.type === 'caption') {
             setActiveCaption({
               speaker: data.speaker,
               text: data.text,
               isInterim: !data.is_final,
-              timestamp: data.timestamp
+              timestamp: data.timestamp,
+              color: data.color,
+              user_id: data.user_id,
             });
 
-            if (data.is_final && data.text.trim()) {
+            if (data.is_final && data.text?.trim()) {
               setChatMessages((prev) => [
                 ...prev,
                 {
                   id: `cap-${Date.now()}-${Math.random()}`,
                   speaker: data.speaker,
                   text: data.text.trim(),
-                  time: data.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                  time: data.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  color: data.color,
                 }
               ]);
 
@@ -332,6 +425,18 @@ export const LiveMeeting: React.FC = () => {
               }, 4500);
             }
           }
+
+          // ── Hand-raise event from a remote participant ──
+          else if (data.type === 'hand_raise') {
+            setLiveParticipants(prev =>
+              prev.map(p =>
+                p.user_id === data.user_id
+                  ? { ...p, handRaised: data.raised }
+                  : p
+              )
+            );
+          }
+
         } catch (e) {
           console.warn("WebSocket message parsing error:", e);
         }
@@ -347,7 +452,7 @@ export const LiveMeeting: React.FC = () => {
     return () => {
       if (ws) ws.close();
     };
-  }, [id]);
+  }, [id, token]);
 
   // 6. Web Speech API live microphone speech recognition
   useEffect(() => {
@@ -401,13 +506,13 @@ export const LiveMeeting: React.FC = () => {
             speaker: `${currentSpeakerName} (You)`,
             text: interimText.trim(),
             isInterim: true,
-            timestamp: timeStr
+            timestamp: timeStr,
+            color: myColor,
           });
 
           if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({
               type: 'caption',
-              speaker: currentSpeakerName,
               text: interimText.trim(),
               is_final: false,
               timestamp: timeStr
@@ -421,7 +526,8 @@ export const LiveMeeting: React.FC = () => {
             speaker: `${currentSpeakerName} (You)`,
             text: cleanFinal,
             isInterim: false,
-            timestamp: timeStr
+            timestamp: timeStr,
+            color: myColor,
           });
 
           setChatMessages((prev) => [
@@ -430,14 +536,14 @@ export const LiveMeeting: React.FC = () => {
               id: `cap-${Date.now()}-${Math.random()}`,
               speaker: `${currentSpeakerName} (You)`,
               text: cleanFinal,
-              time: timeStr
+              time: timeStr,
+              color: myColor,
             }
           ]);
 
           if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({
               type: 'caption',
-              speaker: currentSpeakerName,
               text: cleanFinal,
               is_final: true,
               timestamp: timeStr
@@ -483,7 +589,7 @@ export const LiveMeeting: React.FC = () => {
         } catch (e) {}
       }
     };
-  }, [captionsEnabled, isMicMuted, currentSpeakerName]);
+  }, [captionsEnabled, isMicMuted, currentSpeakerName, myColor]);
 
   // 7. Fallback dialogue if microphone speech is blocked
   useEffect(() => {
@@ -547,16 +653,16 @@ export const LiveMeeting: React.FC = () => {
       id: `chat-${Date.now()}`,
       speaker: `${currentSpeakerName} (You)`,
       text: chatInput.trim(),
-      time: timeStr
+      time: timeStr,
+      color: myColor,
     };
 
     setChatMessages((prev) => [...prev, newMsg]);
 
-    // Send through WebSocket
+    // Send through WebSocket — server will attach correct identity+color
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
         type: 'caption',
-        speaker: currentSpeakerName,
         text: chatInput.trim(),
         is_final: true,
         timestamp: timeStr
@@ -564,6 +670,18 @@ export const LiveMeeting: React.FC = () => {
     }
 
     setChatInput('');
+  };
+
+  // Broadcast hand-raise state change to all participants via WebSocket
+  const handleHandRaise = () => {
+    const newState = !isHandRaised;
+    setIsHandRaised(newState);
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'hand_raise',
+        raised: newState,
+      }));
+    }
   };
 
   const handleEndMeeting = async () => {
@@ -730,7 +848,10 @@ export const LiveMeeting: React.FC = () => {
               <div className="absolute bottom-16 left-6 right-6 z-30 flex justify-center pointer-events-none animate-fadeIn">
                 <div className="bg-[#202124]/90 backdrop-blur-md border border-white/15 px-5 py-3 rounded-xl shadow-2xl max-w-2xl text-center space-y-1">
                   <div className="flex items-center justify-center gap-2">
-                    <span className="text-[11px] font-bold text-[#8ab4f8] uppercase tracking-wider">
+                    <span
+                      className="text-[11px] font-bold uppercase tracking-wider"
+                      style={{ color: activeCaption.color || '#8ab4f8' }}
+                    >
                       {activeCaption.speaker}
                     </span>
                     {activeCaption.isInterim && (
@@ -783,7 +904,7 @@ export const LiveMeeting: React.FC = () => {
                 }`}
               >
                 <Users className="h-3.5 w-3.5" />
-                People (2)
+                People ({liveParticipants.length || 1})
               </button>
               <button
                 onClick={() => setActiveSidebar('telemetry')}
@@ -852,7 +973,12 @@ export const LiveMeeting: React.FC = () => {
                         }`}
                       >
                         <div className="flex items-center justify-between text-[10px] text-slate-400">
-                          <span className="font-semibold text-[#8ab4f8]">{msg.speaker}</span>
+                          <span
+                            className="font-semibold"
+                            style={{ color: msg.color || '#8ab4f8' }}
+                          >
+                            {msg.speaker}
+                          </span>
                           <span>{msg.time}</span>
                         </div>
                         <p className="leading-relaxed">{msg.text}</p>
@@ -881,47 +1007,76 @@ export const LiveMeeting: React.FC = () => {
                 </div>
               )}
 
-              {/* TAB: People */}
+              {/* TAB: People — dynamic real-time participant list */}
               {activeSidebar === 'people' && (
                 <div className="space-y-4">
                   <div className="flex items-center justify-between text-xs text-slate-400">
                     <span>IN CALL</span>
-                    <span>2 people</span>
+                    <span>{liveParticipants.length || 1} {(liveParticipants.length || 1) === 1 ? 'person' : 'people'}</span>
                   </div>
 
-                  {/* Participant: Current User */}
-                  <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#303134]/40 border border-[#3c4043]/50">
-                    <div className="flex items-center gap-3">
-                      <div className="h-8 w-8 rounded-full bg-[#1a73e8] flex items-center justify-center font-bold text-xs">
-                        {(currentSpeakerName[0] || 'U').toUpperCase()}
+                  {/* If we have live participants from WS, render them */}
+                  {liveParticipants.length > 0 ? (
+                    liveParticipants.map((p) => (
+                      <div
+                        key={p.user_id}
+                        className={`flex items-center justify-between p-2.5 rounded-xl border transition-all ${
+                          p.isLocal
+                            ? 'bg-[#303134]/60 border-[#3c4043]/70'
+                            : 'bg-[#303134]/25 border-[#3c4043]/35'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          {/* Color-coded avatar circle */}
+                          <div
+                            className="h-8 w-8 rounded-full flex items-center justify-center font-bold text-xs text-black shadow-md"
+                            style={{ backgroundColor: p.color }}
+                          >
+                            {(p.name[0] || '?').toUpperCase()}
+                          </div>
+                          <div>
+                            <p className="text-xs font-semibold text-white flex items-center gap-1.5">
+                              {p.name}
+                              {p.isLocal && <span className="text-[9px] text-slate-400 font-normal">(You)</span>}
+                              {p.handRaised && (
+                                <Hand className="h-3 w-3 text-amber-400 fill-amber-400" />
+                              )}
+                            </p>
+                            <p className="text-[10px] text-slate-400">
+                              {p.isLocal ? (isHost ? 'Host · You' : 'Participant · You') : 'Participant'}
+                            </p>
+                          </div>
+                        </div>
+                        {/* Mic state — only known for local user */}
+                        {p.isLocal ? (
+                          isMicMuted
+                            ? <MicOff className="h-4 w-4 text-red-400" />
+                            : <Mic className="h-4 w-4 text-emerald-400" />
+                        ) : (
+                          <Mic className="h-4 w-4 text-slate-500" />
+                        )}
                       </div>
-                      <div>
-                        <p className="text-xs font-semibold text-white">{currentSpeakerName} (You)</p>
-                        <p className="text-[10px] text-slate-400">Meeting host</p>
+                    ))
+                  ) : (
+                    /* Fallback: show current user while WS connects */
+                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#303134]/40 border border-[#3c4043]/50">
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="h-8 w-8 rounded-full flex items-center justify-center font-bold text-xs text-black"
+                          style={{ backgroundColor: myColor }}
+                        >
+                          {(currentSpeakerName[0] || 'U').toUpperCase()}
+                        </div>
+                        <div>
+                          <p className="text-xs font-semibold text-white">{currentSpeakerName} (You)</p>
+                          <p className="text-[10px] text-slate-400">{isHost ? 'Host' : 'Participant'}</p>
+                        </div>
                       </div>
+                      {isMicMuted
+                        ? <MicOff className="h-4 w-4 text-red-400" />
+                        : <Mic className="h-4 w-4 text-emerald-400" />}
                     </div>
-                    <div>
-                      {isMicMuted ? (
-                        <MicOff className="h-4 w-4 text-red-400" />
-                      ) : (
-                        <Mic className="h-4 w-4 text-emerald-400" />
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Participant: Remote Peer */}
-                  <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#303134]/20 border border-[#3c4043]/30">
-                    <div className="flex items-center gap-3">
-                      <div className="h-8 w-8 rounded-full bg-[#ea4335] flex items-center justify-center font-bold text-xs">
-                        D
-                      </div>
-                      <div>
-                        <p className="text-xs font-semibold text-white">Daniel</p>
-                        <p className="text-[10px] text-slate-400">Contributor</p>
-                      </div>
-                    </div>
-                    <Mic className="h-4 w-4 text-emerald-400" />
-                  </div>
+                  )}
                 </div>
               )}
 
@@ -1063,7 +1218,7 @@ export const LiveMeeting: React.FC = () => {
 
           {/* 4. Raise Hand Button */}
           <button
-            onClick={() => setIsHandRaised(!isHandRaised)}
+            onClick={handleHandRaise}
             className={`h-12 w-12 rounded-full flex items-center justify-center transition-all shadow-md cursor-pointer ${
               isHandRaised
                 ? 'bg-[#f29900] text-black hover:bg-[#e38c00]'
@@ -1160,7 +1315,7 @@ export const LiveMeeting: React.FC = () => {
           >
             <Users className="h-5 w-5" />
             <span className="absolute top-1.5 right-1.5 h-3.5 w-3.5 rounded-full bg-[#1a73e8] text-[9px] font-bold flex items-center justify-center text-white">
-              2
+              {liveParticipants.length || 1}
             </span>
           </button>
 

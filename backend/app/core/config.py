@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     # AI Integration
     GROQ_API_KEY: str = ""
     GEMINI_API_KEY: str = ""
+    ASSEMBLYAI_API_KEY: str = ""
 
     # Speech-to-Text Configurations
     WHISPER_MODEL_NAME: str = "tiny.en"

@@ -179,17 +179,79 @@ def start_meeting(
 
 
 @router.websocket("/{id}/ws")
-async def meeting_live_ws(websocket: WebSocket, id: int):
-    """WebSocket endpoint for real-time live captions and participant coordination."""
-    await manager.connect(websocket, id)
+async def meeting_live_ws(
+    websocket: WebSocket,
+    id: int,
+    token: Optional[str] = None
+):
+    """
+    WebSocket endpoint for real-time multi-user live captions and participant coordination.
+    Authentication via ?token=<jwt> query parameter.
+    Messages broadcast include: caption, participant_joined, participant_left, participants_list, ping/pong.
+    """
+    from app.core.security import decode_access_token
+    from app.database.session import SessionLocal
+
+    # Authenticate the connecting user via token query param
+    user_id: int = 0
+    user_name: str = "Guest"
+    user_color: str = "#8ab4f8"
+
+    if token:
+        try:
+            payload = decode_access_token(token)
+            if payload:
+                uid = payload.get("sub")
+                if uid:
+                    db_temp = SessionLocal()
+                    try:
+                        from app.models.user import User as UserModel
+                        db_user = db_temp.query(UserModel).filter(UserModel.id == int(uid)).first()
+                        if db_user and db_user.is_active:
+                            user_id = db_user.id
+                            user_name = db_user.full_name or db_user.email.split("@")[0]
+                    finally:
+                        db_temp.close()
+        except Exception as e:
+            logger.warning(f"WS auth token parse error: {e}")
+
+    # If unauthenticated, still allow guest access with anonymous identity
+    if user_id == 0:
+        import random
+        user_id = -random.randint(1000, 9999)
+        user_name = f"Guest-{abs(user_id) % 1000}"
+
+    # Connect and get assigned color
+    participant = await manager.connect(websocket, id, user_id, user_name)
+    user_color = participant.color
+
     try:
-        # Send current live transcript history to newly connected participant
+        # 1. Send current participants list to newly connected user
+        participants_snapshot = manager.get_participants(id)
+        await websocket.send_text(json.dumps({
+            "type": "participants_list",
+            "participants": participants_snapshot,
+            "your_color": user_color,
+            "your_user_id": user_id,
+        }))
+
+        # 2. Send live caption history to newly connected participant
         history = active_live_transcripts.get(id, [])
         if history:
             await websocket.send_text(json.dumps({
                 "type": "history",
                 "captions": history
             }))
+
+        # 3. Broadcast join event to everyone else
+        await manager.broadcast_to_meeting(id, {
+            "type": "participant_joined",
+            "user_id": user_id,
+            "name": user_name,
+            "color": user_color,
+            "participant_count": manager.get_participant_count(id),
+            "participants": manager.get_participants(id),
+        }, exclude_ws=websocket)
 
         while True:
             data_text = await websocket.receive_text()
@@ -198,9 +260,12 @@ async def meeting_live_ws(websocket: WebSocket, id: int):
                 msg_type = msg.get("type")
 
                 if msg_type == "caption":
+                    # Enrich caption with authenticated speaker info and assigned color
                     caption_payload = {
                         "type": "caption",
-                        "speaker": msg.get("speaker", "Speaker"),
+                        "speaker": user_name,
+                        "user_id": user_id,
+                        "color": user_color,
                         "text": msg.get("text", "").strip(),
                         "is_final": bool(msg.get("is_final", False)),
                         "timestamp": msg.get("timestamp", datetime.utcnow().strftime("%H:%M:%S")),
@@ -214,15 +279,62 @@ async def meeting_live_ws(websocket: WebSocket, id: int):
                     # Broadcast to all connected participants in this meeting room
                     await manager.broadcast_to_meeting(id, caption_payload)
 
+                elif msg_type == "hand_raise":
+                    # Broadcast hand-raise state to all participants
+                    await manager.broadcast_to_meeting(id, {
+                        "type": "hand_raise",
+                        "user_id": user_id,
+                        "name": user_name,
+                        "raised": bool(msg.get("raised", False)),
+                    })
+
                 elif msg_type == "ping":
                     await websocket.send_text(json.dumps({"type": "pong"}))
+
+                elif msg_type == "get_participants":
+                    await websocket.send_text(json.dumps({
+                        "type": "participants_list",
+                        "participants": manager.get_participants(id),
+                        "participant_count": manager.get_participant_count(id),
+                    }))
+
             except json.JSONDecodeError:
                 pass
     except WebSocketDisconnect:
-        manager.disconnect(websocket, id)
+        removed = manager.disconnect(websocket, id)
+        if removed:
+            # Broadcast leave event to remaining participants
+            await manager.broadcast_to_meeting(id, {
+                "type": "participant_left",
+                "user_id": removed.user_id,
+                "name": removed.name,
+                "participant_count": manager.get_participant_count(id),
+                "participants": manager.get_participants(id),
+            })
     except Exception as e:
         logger.error(f"WebSocket error in meeting {id}: {e}")
-        manager.disconnect(websocket, id)
+        removed = manager.disconnect(websocket, id)
+        if removed:
+            await manager.broadcast_to_meeting(id, {
+                "type": "participant_left",
+                "user_id": removed.user_id,
+                "name": removed.name,
+                "participant_count": manager.get_participant_count(id),
+                "participants": manager.get_participants(id),
+            })
+
+
+@router.get("/{id}/live-participants")
+def get_live_participants(
+    id: int,
+    current_user: User = Depends(deps.get_current_active_user),
+) -> Any:
+    """Return the current list of live WebSocket-connected participants for a meeting."""
+    return {
+        "meeting_id": id,
+        "participant_count": manager.get_participant_count(id),
+        "participants": manager.get_participants(id),
+    }
 
 
 @router.get("/{id}/live-captions")

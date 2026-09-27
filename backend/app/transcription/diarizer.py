@@ -1,302 +1,274 @@
-import os
+"""
+assemblyai_diarizer.py  —  AssemblyAI-powered Speaker Diarization
+===================================================================
+Uses AssemblyAI's cloud Speech-to-Text + Speaker Diarization API to
+identify *who spoke what* inside a recorded meeting WAV file.
+
+Key behaviours
+--------------
+* When ASSEMBLYAI_API_KEY is set (and non-empty) in settings:
+    → Upload the WAV file to AssemblyAI.
+    → Request transcription with speaker_labels=True (diarization).
+    → Return segments enriched with "speaker" labels
+      (e.g. "Speaker A", "Speaker B") mapped to participant names if provided.
+    → Also return a corrected full-text string.
+
+* When the key is absent or the call fails:
+    → Fall back silently to a lightweight single-speaker label pass so
+      the rest of the pipeline never crashes.
+
+Public interface (unchanged from previous diarizer)
+----------------------------------------------------
+    speaker_diarizer.diarize_segments(wav_path, segments, participant_names)
+    
+    Returns the same segments list with "speaker" field populated.
+    
+    NOTE: When called from whisper_runner the segments already contain
+    {start, end, text}.  AssemblyAI diarization results are *merged* onto
+    those time-aligned Whisper segments so we keep Whisper's fine-grained
+    text while using AssemblyAI's superior speaker labels.
+"""
+
 import logging
-from typing import Dict, List, Optional, Tuple
-import numpy as np
-from scipy.io import wavfile
+import os
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# Global cache to optimize file reading during diarization loops
-_audio_cache = {}
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
-def extract_segment_audio(wav_path: str, start_sec: float, end_sec: float) -> Tuple[np.ndarray, int]:
+def _map_speaker_label(aai_label: str, participant_names: Optional[List[str]]) -> str:
     """
-    Reads a slice of the WAV audio corresponding to start_sec and end_sec.
-    Converts stereo to mono and normalizes scale. Caches loaded audio to prevent redundant disk reads.
+    Convert AssemblyAI's generic label (e.g. "A", "B") to a participant name
+    if enough participant names were provided, otherwise return "Speaker A".
     """
-    if not os.path.exists(wav_path):
-        return np.array([], dtype=np.float32), 16000
-        
-    try:
-        if wav_path not in _audio_cache:
-            sample_rate, data = wavfile.read(wav_path)
-            # Convert stereo to mono
-            if len(data.shape) > 1:
-                data = data.mean(axis=1)
-                
-            # Normalize to float32 between [-1.0, 1.0]
-            if data.dtype == np.int16:
-                data = data.astype(np.float32) / 32768.0
-            elif data.dtype == np.int32:
-                data = data.astype(np.float32) / 2147483648.0
-            elif data.dtype == np.uint8:
-                data = (data.astype(np.float32) - 128.0) / 128.0
-            _audio_cache[wav_path] = (sample_rate, data)
-        else:
-            sample_rate, data = _audio_cache[wav_path]
-            
-        start_sample = int(start_sec * sample_rate)
-        end_sample = int(end_sec * sample_rate)
-        
-        # Guard limits
-        start_sample = max(0, min(start_sample, len(data)))
-        end_sample = max(0, min(end_sample, len(data)))
-        
-        return data[start_sample:end_sample], sample_rate
-    except Exception as e:
-        logger.error(f"Error extracting WAV slice from {wav_path}: {e}")
-        return np.array([], dtype=np.float32), 16000
+    if not aai_label:
+        return "Speaker A"
+
+    # AssemblyAI returns uppercase letters: "A", "B", "C" …
+    label = aai_label.strip().upper()
+    index = ord(label) - ord("A")  # A→0, B→1, …
+
+    if participant_names and 0 <= index < len(participant_names):
+        return participant_names[index]
+
+    return f"Speaker {label}"
 
 
-def extract_voice_print(audio_data: np.ndarray, sample_rate: int) -> np.ndarray:
+def _merge_aai_speakers_into_segments(
+    whisper_segments: List[Dict],
+    aai_utterances: list,          # assemblyai.Utterance list
+    participant_names: Optional[List[str]],
+) -> List[Dict]:
     """
-    Computes a 10-dimensional Mel-spaced spectral energy voice print from audio data.
-    """
-    if len(audio_data) < 512:
-        return np.zeros(10, dtype=np.float32)
-        
-    # Compute Fast Fourier Transform
-    fft_data = np.abs(np.fft.rfft(audio_data))
-    fft_freqs = np.fft.rfftfreq(len(audio_data), 1.0 / sample_rate)
-    
-    # Human voice range filter (100Hz to 4000Hz) spacing out logarithmically (Mel-spaced)
-    min_mel = 1127.0 * np.log(1.0 + 100.0 / 700.0)
-    max_mel = 1127.0 * np.log(1.0 + 4000.0 / 700.0)
-    
-    mel_points = np.linspace(min_mel, max_mel, 11)
-    freq_bins = 700.0 * (np.exp(mel_points / 1127.0) - 1.0)
-    
-    feature_vector = []
-    for i in range(10):
-        low_f = freq_bins[i]
-        high_f = freq_bins[i+1]
-        
-        mask = (fft_freqs >= low_f) & (fft_freqs < high_f)
-        if np.any(mask):
-            band_energy = np.mean(fft_data[mask])
-        else:
-            band_energy = 0.0
-        feature_vector.append(band_energy)
-        
-    features = np.array(feature_vector, dtype=np.float32)
-    
-    # Normalize features using L2 norm
-    norm = np.linalg.norm(features)
-    if norm > 1e-6:
-        features = features / norm
-    else:
-        features = np.zeros(10, dtype=np.float32)
-        
-    return features
+    Align AssemblyAI utterances (which carry speaker labels) onto Whisper
+    segments using time overlap.  Each Whisper segment gets the label of
+    whichever AssemblyAI utterance it overlaps the most.
 
+    Args:
+        whisper_segments : list of {start, end, text, speaker}  (seconds)
+        aai_utterances   : list of assemblyai.Utterance objects
+                           each has .start (ms), .end (ms), .speaker ("A"/"B"…)
+        participant_names: optional list used to map labels to real names
 
-def compute_silhouette_score(X: np.ndarray, labels: np.ndarray) -> float:
-    """
-    Computes the mean Silhouette Coefficient for the dataset X clustered into labels.
-    """
-    n = len(X)
-    if n <= 1:
-        return 0.0
-        
-    unique_labels = np.unique(labels)
-    if len(unique_labels) <= 1:
-        return 0.0
-        
-    silhouettes = []
-    for i in range(n):
-        c_idx = labels[i]
-        same_cluster = X[labels == c_idx]
-        if len(same_cluster) > 1:
-            a_i = np.mean(np.linalg.norm(same_cluster - X[i], axis=1))
-        else:
-            a_i = 0.0
-            
-        b_i = float('inf')
-        for other_c in unique_labels:
-            if other_c == c_idx:
-                continue
-            other_cluster = X[labels == other_c]
-            dist_to_other = np.mean(np.linalg.norm(other_cluster - X[i], axis=1))
-            if dist_to_other < b_i:
-                b_i = dist_to_other
-                
-        max_val = max(a_i, b_i)
-        s_i = (b_i - a_i) / max_val if max_val > 0 else 0.0
-        silhouettes.append(s_i)
-        
-    return float(np.mean(silhouettes))
-
-
-def kmeans_cluster(X: np.ndarray, k: int, max_iters: int = 25) -> np.ndarray:
-    """
-    K-Means clustering implementation using pure NumPy.
     Returns:
-        - labels: array of cluster indices (0 to k-1) for each row in X
+        whisper_segments with "speaker" field updated in-place.
     """
-    n, d = X.shape
-    if n == 0:
-        return np.array([], dtype=np.int32)
-    if k <= 1:
-        return np.zeros(n, dtype=np.int32)
-        
-    # Prevent k from exceeding n
-    k = min(k, n)
-    
-    # Random initialization (pick k unique rows)
-    np.random.seed(42)  # For deterministic reproducibility
-    idx = np.random.choice(n, k, replace=False)
-    centroids = X[idx].copy()
-    
-    labels = np.zeros(n, dtype=np.int32)
-    for _ in range(max_iters):
-        # Compute pairwise Euclidean distances: (n, k)
-        diff = X[:, np.newaxis, :] - centroids[np.newaxis, :, :]
-        distances = np.linalg.norm(diff, axis=2)
-        
-        # Assign to nearest centroid
-        new_labels = np.argmin(distances, axis=1)
-        
-        if np.array_equal(labels, new_labels):
-            break
-        labels = new_labels
-        
-        # Update centroids
-        for i in range(k):
-            members = X[labels == i]
-            if len(members) > 0:
-                centroids[i] = members.mean(axis=0)
-                
-    return labels
+    if not aai_utterances:
+        return whisper_segments
+
+    for seg in whisper_segments:
+        seg_start_ms = seg.get("start", 0.0) * 1000.0
+        seg_end_ms   = seg.get("end",   0.0) * 1000.0
+
+        best_speaker = None
+        best_overlap = 0.0
+
+        for utt in aai_utterances:
+            utt_start = float(utt.start)  # already in ms
+            utt_end   = float(utt.end)
+
+            # Compute overlap duration
+            overlap_start = max(seg_start_ms, utt_start)
+            overlap_end   = min(seg_end_ms,   utt_end)
+            overlap       = max(0.0, overlap_end - overlap_start)
+
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_speaker = utt.speaker
+
+        if best_speaker is not None:
+            seg["speaker"] = _map_speaker_label(best_speaker, participant_names)
+        elif "speaker" not in seg:
+            seg["speaker"] = _map_speaker_label("A", participant_names)
+
+    return whisper_segments
 
 
-class SpeakerDiarizer:
+# ---------------------------------------------------------------------------
+# AssemblyAI Diarizer
+# ---------------------------------------------------------------------------
+
+class AssemblyAIDiarizer:
     """
-    Splits mono-speaker Whisper transcripts into distinct speaker categories
-    using spectral voice print features and custom K-Means clustering.
+    Speaker diarizer backed by AssemblyAI's cloud API.
+
+    Workflow
+    --------
+    1. Configure the SDK with the API key from settings.
+    2. Upload the local WAV file.
+    3. Submit a transcription job with speaker_labels=True.
+    4. Poll until done (blocking — called inside a background task / thread).
+    5. Merge returned utterances onto the Whisper segment list.
     """
-    
+
+    def __init__(self):
+        self._api_key: Optional[str] = None
+        self._ready: bool = False
+        self._init()
+
+    def _init(self):
+        """Lazy-initialise AssemblyAI SDK with the API key from app settings."""
+        try:
+            from app.core.config import settings
+            key = getattr(settings, "ASSEMBLYAI_API_KEY", "").strip()
+            if not key:
+                logger.warning(
+                    "ASSEMBLYAI_API_KEY is not set. "
+                    "Speaker diarization will fall back to single-speaker labels."
+                )
+                return
+
+            import assemblyai as aai
+            aai.settings.api_key = key
+            self._api_key = key
+            self._ready = True
+            logger.info("AssemblyAI SDK initialised successfully.")
+        except ImportError:
+            logger.warning(
+                "assemblyai package not installed. "
+                "Run: pip install assemblyai. "
+                "Falling back to single-speaker labels."
+            )
+        except Exception as e:
+            logger.error(f"AssemblyAI init error: {e}")
+
+    # ------------------------------------------------------------------
+    # Public method (matches the old diarizer interface)
+    # ------------------------------------------------------------------
+
     def diarize_segments(
-        self, 
-        wav_path: str, 
-        segments: List[Dict], 
-        participant_names: Optional[List[str]] = None
+        self,
+        wav_path: str,
+        segments: List[Dict],
+        participant_names: Optional[List[str]] = None,
     ) -> List[Dict]:
         """
-        Processes segments, extracts spectral voice prints from the audio file,
-        runs K-Means to identify speakers, and updates speaker tags.
+        Enrich *segments* with speaker labels using AssemblyAI diarization.
+
+        Parameters
+        ----------
+        wav_path          : Absolute path to the recorded WAV file.
+        segments          : Whisper segments [{start, end, text, speaker}, …].
+        participant_names : Optional real names for Speaker A, B, C …
+
+        Returns
+        -------
+        Same list with "speaker" fields filled in.
         """
         if not segments:
             return []
 
-        # Fast path: Single designated participant or very few segments
+        # Fast path: single participant
         if participant_names and len(participant_names) == 1:
             for seg in segments:
                 seg["speaker"] = participant_names[0]
             return segments
 
-        if len(segments) <= 2:
-            default_name = participant_names[0] if participant_names else "Speaker 1"
-            for seg in segments:
-                seg["speaker"] = default_name
-            return segments
+        if not self._ready:
+            return self._fallback_label(segments, participant_names)
+
+        if not wav_path or not os.path.exists(wav_path):
+            logger.warning(f"WAV file not found for diarization: {wav_path}")
+            return self._fallback_label(segments, participant_names)
 
         try:
-            # Determine optimal target upper bound for speakers
-            max_k = min(4, len(participant_names) if (participant_names and len(participant_names) >= 2) else 3)
-                
-            logger.info(f"Diarizing {len(segments)} segments. Upper bound speakers: {max_k}")
-            
-            # Extract features for all segments
-            embeddings = []
-            valid_indices = []
-            
-            for idx, seg in enumerate(segments):
-                start = seg.get("start", 0.0)
-                end = seg.get("end", 0.0)
-                duration = end - start
-                
-                # Skip very short segment clips to prevent noise fitting
-                if duration < 0.4:
-                    continue
-                    
-                audio_slice, sr = extract_segment_audio(wav_path, start, end)
-                
-                # Check for silence (low average amplitude)
-                if len(audio_slice) == 0 or np.max(np.abs(audio_slice)) < 1e-4:
-                    continue
-                    
-                features = extract_voice_print(audio_slice, sr)
-                if np.any(features):
-                    embeddings.append(features)
-                    valid_indices.append(idx)
-                    
-            # If we didn't get enough valid segments to run clustering, return default speaker labels
-            if len(embeddings) == 0:
-                logger.warning("No audio segments met minimum criteria for voice print clustering. Using default speaker.")
-                default_name = participant_names[0] if participant_names else "Speaker 1"
-                for seg in segments:
-                    seg["speaker"] = default_name
-                return segments
-                
-            X = np.stack(embeddings)
-            
-            # Find optimal k using Silhouette Coefficient scoring (minimum 2 speakers if possible)
-            k = max_k
-            if len(embeddings) > 2 and max_k > 2:
-                best_k = 2
-                best_score = -1.0
-                
-                # Evaluate silhouette score for each k from 2 up to max_k
-                for test_k in range(2, max_k + 1):
-                    if test_k > len(embeddings):
-                        break
-                    labels = kmeans_cluster(X, k=test_k)
-                    score = compute_silhouette_score(X, labels)
-                    logger.info(f"Diarizer: Silhouette Score for K={test_k} is {score:.4f}")
-                    
-                    # We select the K that maximizes the clustering silhouette score
-                    if score > best_score:
-                        best_score = score
-                        best_k = test_k
-                k = best_k
-                logger.info(f"Diarizer: Selected optimal speaker count K={k} with validation score {best_score:.4f}")
-                
-            # Run custom clustering
-            cluster_labels = kmeans_cluster(X, k=k)
-            
-            # Map cluster IDs (0 to k-1) to names
-            # Format: "Speaker A", "Speaker B" or actual participant names
-            speaker_mapping = {}
-            for i in range(k):
-                if participant_names and i < len(participant_names):
-                    speaker_mapping[i] = participant_names[i]
-                else:
-                    # Fallback Speaker letters (Speaker A, B, C...)
-                    speaker_mapping[i] = f"Speaker {chr(65 + i)}"
-                    
-            # Map valid segments
-            for idx, cluster_id in zip(valid_indices, cluster_labels):
-                segments[idx]["speaker"] = speaker_mapping.get(cluster_id, f"Speaker {cluster_id}")
-                
-            # Map invalid (short/silent) segments to their nearest valid neighbor in time
-            # This keeps the conversation turns continuous
-            for idx in range(len(segments)):
-                if idx not in valid_indices:
-                    # Find closest index in valid_indices
-                    if not valid_indices:
-                        # Fallback
-                        segments[idx]["speaker"] = speaker_mapping[0]
-                        continue
-                        
-                    closest_valid_idx = min(valid_indices, key=lambda x: abs(x - idx))
-                    segments[idx]["speaker"] = segments[closest_valid_idx]["speaker"]
-                    
-            return segments
-        finally:
-            # Clear the cached WAV file to prevent memory leak
-            _audio_cache.pop(wav_path, None)
+            return self._run_assemblyai(wav_path, segments, participant_names)
+        except Exception as e:
+            logger.error(f"AssemblyAI diarization failed: {e}. Using fallback.")
+            return self._fallback_label(segments, participant_names)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _run_assemblyai(
+        self,
+        wav_path: str,
+        segments: List[Dict],
+        participant_names: Optional[List[str]],
+    ) -> List[Dict]:
+        """Upload the file to AssemblyAI and retrieve diarized utterances."""
+        import assemblyai as aai
+
+        logger.info(f"Uploading '{wav_path}' to AssemblyAI for speaker diarization …")
+
+        config = aai.TranscriptionConfig(
+            speaker_labels=True,           # ← enables diarization
+            speakers_expected=(            # hint: improves accuracy
+                len(participant_names)
+                if participant_names and len(participant_names) >= 2
+                else None
+            ),
+            language_code="en",
+        )
+
+        transcriber = aai.Transcriber(config=config)
+        transcript  = transcriber.transcribe(wav_path)
+
+        if transcript.status == aai.TranscriptStatus.error:
+            raise RuntimeError(f"AssemblyAI error: {transcript.error}")
+
+        utterances = transcript.utterances or []
+        logger.info(
+            f"AssemblyAI diarization complete. "
+            f"{len(utterances)} utterances, "
+            f"{len(set(u.speaker for u in utterances))} unique speakers."
+        )
+
+        # Merge AssemblyAI speaker labels onto Whisper segments
+        enriched = _merge_aai_speakers_into_segments(
+            segments, utterances, participant_names
+        )
+
+        # Also build a clean full-text from AssemblyAI's own transcript
+        # (better punctuation than Whisper's greedy decode) and attach it
+        # as a metadata key so whisper_runner can use it if desired.
+        if transcript.text:
+            enriched[0]["__aai_full_text__"] = transcript.text
+
+        return enriched
+
+    @staticmethod
+    def _fallback_label(
+        segments: List[Dict],
+        participant_names: Optional[List[str]],
+    ) -> List[Dict]:
+        """
+        When AssemblyAI is unavailable: assign all segments to the first
+        participant name, or "Speaker A" if no names are available.
+        This ensures downstream code always has a non-null speaker field.
+        """
+        label = (participant_names[0] if participant_names else "Speaker A")
+        for seg in segments:
+            seg.setdefault("speaker", label)
+        return segments
 
 
-# Singleton instance
-speaker_diarizer = SpeakerDiarizer()
+# ---------------------------------------------------------------------------
+# Module-level singleton  (matches old interface: speaker_diarizer)
+# ---------------------------------------------------------------------------
+speaker_diarizer = AssemblyAIDiarizer()

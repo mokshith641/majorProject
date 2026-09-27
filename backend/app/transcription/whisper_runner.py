@@ -97,20 +97,36 @@ class WhisperTranscriber:
                     "start": round(segment.start, 2),
                     "end": round(segment.end, 2),
                     "text": corrected_text,
-                    "speaker": "Speaker 1"
+                    "speaker": "Speaker A"
                 })
                 
             full_text = " ".join(full_text_list)
             
-            # Apply speaker diarization clustering on segment audio clips
+            # ── Speaker Diarization via AssemblyAI ───────────────────────────
+            # The diarizer uploads the WAV to AssemblyAI, returns per-utterance
+            # speaker labels merged onto Whisper time-segments.
+            # If AssemblyAI also returns a better-punctuated full transcript it
+            # is stored in segment_list[0]["__aai_full_text__"] and used below.
             try:
                 from app.transcription.diarizer import speaker_diarizer
-                segment_list = speaker_diarizer.diarize_segments(file_path, segment_list, participant_names)
+                segment_list = speaker_diarizer.diarize_segments(
+                    file_path, segment_list, participant_names
+                )
+                # Extract AssemblyAI full-text if the diarizer attached it
+                if segment_list and "__aai_full_text__" in segment_list[0]:
+                    aai_text = segment_list[0].pop("__aai_full_text__")
+                    if aai_text and aai_text.strip():
+                        logger.info("Using AssemblyAI full-text (better punctuation).")
+                        full_text = aai_text.strip()
             except Exception as e:
-                logger.error(f"Failed to execute speaker diarization: {e}")
+                logger.error(f"Speaker diarization failed: {e}")
                 
             duration = round(time.time() - start_time, 2)
-            logger.info(f"Transcription complete in {duration} seconds. Transcribed {len(segment_list)} segments.")
+            n_speakers = len(set(s.get("speaker", "") for s in segment_list))
+            logger.info(
+                f"Transcription complete in {duration}s — "
+                f"{len(segment_list)} segments, {n_speakers} speaker(s)."
+            )
             return full_text, segment_list
             
         except Exception as e:
