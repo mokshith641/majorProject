@@ -14,15 +14,24 @@ router = APIRouter()
 
 
 @router.get("/{meeting_id}/download")
+@router.get("/pdf/{meeting_id}")
 def download_meeting_report(
     meeting_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ) -> Any:
     """Download meeting's exported ReportLab PDF document."""
-    meeting = db.query(Meeting).filter(Meeting.id == meeting_id, Meeting.host_id == current_user.id).first()
+    meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
     if not meeting:
         raise HTTPException(status_code=404, detail="Meeting not found")
+
+    if meeting.host_id != current_user.id and not current_user.is_superuser:
+        from app.models.meeting import Participant
+        is_participant = db.query(Participant).filter(
+            Participant.meeting_id == meeting_id, Participant.email == current_user.email
+        ).first()
+        if not is_participant:
+            raise HTTPException(status_code=403, detail="You do not have permission to access this report.")
 
     report = db.query(Report).filter(Report.meeting_id == meeting_id).first()
     if not report or not os.path.exists(report.file_path):

@@ -518,24 +518,40 @@ def end_meeting(
 
 
 @router.post("/{id}/upload-recording", response_model=MeetingResponse)
+@router.post("/{id}/upload-audio", response_model=MeetingResponse)
 async def upload_meeting_recording(
     id: int,
-    file: UploadFile = File(...),
+    file: Optional[UploadFile] = File(None),
+    audio: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(deps.get_current_active_user)
 ) -> Any:
-    """Upload pre-recorded browser WAV file directly. Runs STT, AI Summarizer, and exports PDF."""
-    meeting = db.query(Meeting).filter(Meeting.id == id, Meeting.host_id == current_user.id).first()
+    """Upload pre-recorded WAV or MP3 file directly. Runs STT, AI Summarizer, and exports PDF."""
+    meeting = db.query(Meeting).filter(Meeting.id == id).first()
     if not meeting:
         raise HTTPException(status_code=404, detail="Meeting not found")
 
+    if meeting.host_id != current_user.id and not current_user.is_superuser:
+        is_participant = db.query(Participant).filter(
+            Participant.meeting_id == id, Participant.email == current_user.email
+        ).first()
+        if not is_participant:
+            raise HTTPException(status_code=403, detail="You do not have permission to modify this meeting.")
+
+    target_file = file or audio
+    if not target_file:
+        raise HTTPException(status_code=400, detail="Audio file is required. Please upload an audio file.")
+
     # Save upload file
-    wav_filename = f"meeting_{meeting.id}.wav"
+    orig_ext = os.path.splitext(target_file.filename or "")[1].lower()
+    if orig_ext not in [".wav", ".mp3", ".m4a", ".ogg", ".webm", ".flac"]:
+        orig_ext = ".wav"
+    wav_filename = f"meeting_{meeting.id}{orig_ext}"
     wav_path = os.path.join(settings.UPLOAD_DIR, wav_filename)
     
     try:
         with open(wav_path, "wb") as buffer:
-            content = await file.read()
+            content = await target_file.read()
             buffer.write(content)
     except Exception as e:
         logger.error(f"Failed saving uploaded file: {e}")
@@ -648,6 +664,7 @@ async def upload_meeting_recording(
 
 
 @router.post("/{id}/submit-transcript", response_model=MeetingResponse)
+@router.post("/{id}/transcript", response_model=MeetingResponse)
 def submit_meeting_transcript(
     id: int,
     payload: dict,
@@ -655,11 +672,18 @@ def submit_meeting_transcript(
     current_user: User = Depends(deps.get_current_active_user)
 ) -> Any:
     """Submit raw text transcript directly. Skips STT, runs AI Summarizer, and exports PDF."""
-    meeting = db.query(Meeting).filter(Meeting.id == id, Meeting.host_id == current_user.id).first()
+    meeting = db.query(Meeting).filter(Meeting.id == id).first()
     if not meeting:
         raise HTTPException(status_code=404, detail="Meeting not found")
 
-    full_text = payload.get("transcript", "").strip()
+    if meeting.host_id != current_user.id and not current_user.is_superuser:
+        is_participant = db.query(Participant).filter(
+            Participant.meeting_id == id, Participant.email == current_user.email
+        ).first()
+        if not is_participant:
+            raise HTTPException(status_code=403, detail="You do not have permission to modify this meeting.")
+
+    full_text = (payload.get("transcript") or payload.get("transcript_text") or "").strip()
     if not full_text:
         raise HTTPException(status_code=400, detail="Transcript text cannot be empty.")
 

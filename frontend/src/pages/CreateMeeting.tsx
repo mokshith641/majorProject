@@ -84,6 +84,7 @@ export const CreateMeeting: React.FC = () => {
         }
 
         const formData = new FormData();
+        formData.append('file', audioFile);
         formData.append('audio', audioFile);
 
         await api.post(`/meetings/${meetingId}/upload-audio`, formData, {
@@ -101,6 +102,7 @@ export const CreateMeeting: React.FC = () => {
         }
 
         await api.post(`/meetings/${meetingId}/transcript`, {
+          transcript: transcriptText,
           transcript_text: transcriptText,
         });
 
@@ -108,9 +110,21 @@ export const CreateMeeting: React.FC = () => {
       }
     } catch (err: any) {
       console.error(err);
-      setErrorMsg(
-        err.response?.data?.detail || 'Failed to initialize session. Please check your inputs.'
-      );
+      let message = 'Failed to initialize session. Please check your inputs.';
+      if (err.response?.status === 401) {
+        message = 'Your login session has expired. Please sign in again.';
+      } else if (err.code === 'ERR_NETWORK' || !err.response) {
+        message = 'Unable to connect to backend server. Please verify the server is running on port 8000.';
+      } else if (err.response?.data?.detail) {
+        if (typeof err.response.data.detail === 'string') {
+          message = err.response.data.detail;
+        } else if (Array.isArray(err.response.data.detail)) {
+          message = err.response.data.detail.map((d: any) => d.msg || JSON.stringify(d)).join(', ');
+        }
+      } else if (err.message) {
+        message = err.message;
+      }
+      setErrorMsg(message);
     } finally {
       setIsSubmitting(false);
     }
