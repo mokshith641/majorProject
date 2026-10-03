@@ -213,7 +213,7 @@ class LocalIntelligenceClient:
         if not api_key:
             return None
 
-        # Candidate models for neural processing
+        # Candidate models for Gemini API (flash models are fastest and most responsive)
         models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
         for model in models:
             try:
@@ -252,15 +252,128 @@ class LocalIntelligenceClient:
                             if parts and "text" in parts[0]:
                                 text = parts[0]["text"]
                                 if text:
-                                    logger.info("Internal neural engine completed successfully.")
+                                    logger.info(f"Gemini neural engine ({model}) completed successfully.")
                                     return text
             except Exception as e:
-                logger.debug(f"Neural engine model variant {model} unavailable, checking alternatives...")
+                logger.debug(f"Gemini model {model} unavailable: {e}")
                 continue
         return None
 
+    def _call_groq_completion(
+        self,
+        prompt: str,
+        json_mode: bool = False,
+        system_instruction: Optional[str] = None
+    ) -> Optional[str]:
+        groq_key = getattr(settings, "GROQ_API_KEY", "") or os.environ.get("GROQ_API_KEY", "")
+        if not groq_key:
+            return None
+        try:
+            if self._client is None:
+                self._client = Groq(api_key=groq_key)
+
+            models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+            for model_name in models:
+                try:
+                    messages = []
+                    if system_instruction:
+                        messages.append({"role": "system", "content": system_instruction})
+                    messages.append({"role": "user", "content": prompt})
+
+                    kwargs = {
+                        "messages": messages,
+                        "model": model_name,
+                        "temperature": 0.2
+                    }
+                    if json_mode:
+                        kwargs["response_format"] = {"type": "json_object"}
+
+                    completion = self._client.chat.completions.create(**kwargs)
+                    text = completion.choices[0].message.content
+                    if text and text.strip():
+                        logger.info(f"Groq Cloud ({model_name}) completed successfully.")
+                        return text
+                except Exception as e:
+                    logger.debug(f"Groq model {model_name} retry: {e}")
+                    continue
+        except Exception as e:
+            logger.warning(f"Groq completion error: {e}")
+        return None
+
+    @staticmethod
+    def _extract_json(text: str) -> Optional[Dict[str, Any]]:
+        if not text:
+            return None
+        cleaned = text.strip()
+        if cleaned.startswith("```json"):
+            cleaned = cleaned[7:]
+        elif cleaned.startswith("```"):
+            cleaned = cleaned[3:]
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3]
+        try:
+            return json.loads(cleaned.strip())
+        except Exception:
+            start = cleaned.find("{")
+            end = cleaned.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                try:
+                    return json.loads(cleaned[start:end+1])
+                except Exception:
+                    pass
+        return None
+
+    def _call_llm_text(self, prompt: str, system_instruction: Optional[str] = None) -> Optional[str]:
+        """Unified text completion: attempts Gemini first, then Groq."""
+        res = self._call_neural_completion(prompt, json_mode=False, system_instruction=system_instruction)
+        if res and res.strip():
+            return res.strip()
+        res = self._call_groq_completion(prompt, json_mode=False, system_instruction=system_instruction)
+        if res and res.strip():
+            return res.strip()
+        return None
+
+    def _call_llm_json(self, prompt: str, system_instruction: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Unified JSON completion: attempts Gemini first, then Groq."""
+        res = self._call_neural_completion(prompt, json_mode=True, system_instruction=system_instruction)
+        if res and res.strip():
+            parsed = self._extract_json(res)
+            if parsed:
+                return parsed
+        res = self._call_groq_completion(prompt, json_mode=True, system_instruction=system_instruction)
+        if res and res.strip():
+            parsed = self._extract_json(res)
+            if parsed:
+                return parsed
+        return None
+
+    def clean_live_caption(self, text: str) -> str:
+        """
+        Fast live caption punctuation, casing, and phonetic normalization.
+        Uses Groq llama-3.1-8b-instant (~100ms) or Gemini Flash.
+        """
+        if not text or len(text.strip().split()) < 2:
+            return text.strip().capitalize() if text else ""
+
+        from app.transcription.corrector import phonetic_corrector
+        pre_cleaned = phonetic_corrector.correct_text(text.strip())
+
+        prompt = (
+            "You are a live meeting speech-to-text post-processor. "
+            "Clean, capitalize, and punctuate the following spoken sentence into clear English. "
+            "Preserve the exact meaning and technical terms. Return ONLY the cleaned sentence with no other text, quotes, or markdown:\n"
+            f"{pre_cleaned}"
+        )
+
+        res = self._call_llm_text(prompt, system_instruction="Output only the cleaned, punctuated sentence.")
+        if res:
+            cleaned = res.strip().strip('"').strip("'")
+            if len(cleaned) >= max(3, len(pre_cleaned) - 15):
+                return cleaned
+        return pre_cleaned
+
     def generate_meeting_title(self, transcript: str) -> Optional[str]:
-        """Generates a concise, high-impact 3-6 word meeting title from transcript."""
+        """Generates a concise, high-impact 3-6 word meeting title from transcript using Gemini/Groq."""
         if not transcript or len(transcript.split()) < 10:
             return None
 
@@ -272,16 +385,11 @@ class LocalIntelligenceClient:
             f"Transcript:\n{transcript[:2500]}"
         )
 
-        neural_key = getattr(settings, "GEMINI_API_KEY", "") or os.environ.get("GEMINI_API_KEY", "")
-        if neural_key:
-            try:
-                res = self._call_neural_completion(prompt, json_mode=False)
-                if res and res.strip():
-                    clean_title = res.strip().strip('"').strip("'").strip()
-                    if 5 < len(clean_title) < 70:
-                        return clean_title
-            except Exception:
-                pass
+        res = self._call_llm_text(prompt)
+        if res:
+            clean_title = res.strip().strip('"').strip("'").strip()
+            if 4 < len(clean_title) < 70:
+                return clean_title
         return None
 
     def generate_live_catchup(self, transcript_lines: List[str], question: Optional[str] = None) -> Dict[str, Any]:
@@ -294,7 +402,6 @@ class LocalIntelligenceClient:
             }
 
         full_text = "\n".join(transcript_lines[-35:])
-
         prompt = (
             "You are an AI meeting assistant helping an attendee catch up on an ongoing meeting.\n"
             "Given the live meeting transcript snippets below:\n"
@@ -310,21 +417,9 @@ class LocalIntelligenceClient:
             f"Transcript Snippets:\n{full_text}"
         )
 
-        neural_key = getattr(settings, "GEMINI_API_KEY", "") or os.environ.get("GEMINI_API_KEY", "")
-        if neural_key:
-            try:
-                res_text = self._call_neural_completion(prompt, json_mode=True)
-                if res_text:
-                    cleaned = res_text.strip()
-                    if cleaned.startswith("```json"):
-                        cleaned = cleaned[7:]
-                    elif cleaned.startswith("```"):
-                        cleaned = cleaned[3:]
-                    if cleaned.endswith("```"):
-                        cleaned = cleaned[:-3]
-                    return json.loads(cleaned.strip())
-            except Exception:
-                pass
+        res = self._call_llm_json(prompt)
+        if res and isinstance(res, dict) and "summary" in res:
+            return res
 
         recent_lines = [l for l in transcript_lines if not l.startswith("System")][-4:]
         return {
@@ -367,21 +462,9 @@ class LocalIntelligenceClient:
             f"Meeting History:\n{history_summary}"
         )
 
-        neural_key = getattr(settings, "GEMINI_API_KEY", "") or os.environ.get("GEMINI_API_KEY", "")
-        if neural_key:
-            try:
-                res_text = self._call_neural_completion(prompt, json_mode=True)
-                if res_text:
-                    cleaned = res_text.strip()
-                    if cleaned.startswith("```json"):
-                        cleaned = cleaned[7:]
-                    elif cleaned.startswith("```"):
-                        cleaned = cleaned[3:]
-                    if cleaned.endswith("```"):
-                        cleaned = cleaned[:-3]
-                    return json.loads(cleaned.strip())
-            except Exception:
-                pass
+        res = self._call_llm_json(prompt)
+        if res and isinstance(res, dict) and "executive_summary" in res:
+            return res
 
         return {
             "executive_summary": "Meetings demonstrate consistent engagement with average focus indices above 80%. Technical deliverables are progressing smoothly.",
@@ -441,60 +524,15 @@ class LocalIntelligenceClient:
                 "Extract the specific updates, decisions, risks, or tasks mentioned, even if simple."
             )
 
-        # 1. Check neural pipeline if key is configured
-        neural_key = getattr(settings, "GEMINI_API_KEY", "") or os.environ.get("GEMINI_API_KEY", "")
-        if neural_key:
-            logger.info("Generating high-quality summary via neural pipeline...")
-            try:
-                full_prompt = f"{system_prompt}\n\nTranscript:\n{transcript}"
-                res_text = self._call_neural_completion(full_prompt, json_mode=True)
-                if res_text:
-                    cleaned_text = res_text.strip()
-                    if cleaned_text.startswith("```json"):
-                        cleaned_text = cleaned_text[7:]
-                    elif cleaned_text.startswith("```"):
-                        cleaned_text = cleaned_text[3:]
-                    if cleaned_text.endswith("```"):
-                        cleaned_text = cleaned_text[:-3]
-                    
-                    res_json = json.loads(cleaned_text.strip())
-                    required_keys = ["key_points", "decisions", "risks", "next_steps", "action_items"]
-                    if all(k in res_json for k in required_keys):
-                        return res_json
-            except Exception as e:
-                logger.warning("Neural pipeline summarization error, falling back to secondary pipelines...")
+        full_prompt = f"{system_prompt}\n\nTranscript:\n{transcript}"
+        res_json = self._call_llm_json(full_prompt)
+        if res_json:
+            required_keys = ["key_points", "decisions", "risks", "next_steps", "action_items"]
+            if all(k in res_json for k in required_keys):
+                logger.info("High-speed AI meeting summary generated successfully via cloud API.")
+                return res_json
 
-        # 2. Check if Groq API is enabled
-        if settings.GROQ_API_KEY:
-            logger.info("Generating summary via cloud assistant API...")
-            try:
-                if self._client is None:
-                    self._client = Groq(api_key=settings.GROQ_API_KEY)
-
-                for model_name in ["llama-3.3-70b-specdec", "llama-3.1-8b-instant", "llama3-8b-8192"]:
-                    try:
-                        completion = self._client.chat.completions.create(
-                            messages=[
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": f"Transcript:\n{transcript}"}
-                            ],
-                            model=model_name,
-                            response_format={"type": "json_object"},
-                            temperature=0.2
-                        )
-                        res_text = completion.choices[0].message.content
-                        res_json = json.loads(res_text)
-                        
-                        required_keys = ["key_points", "decisions", "risks", "next_steps", "action_items"]
-                        if all(k in res_json for k in required_keys):
-                            return res_json
-                    except Exception as e:
-                        logger.warning(f"Secondary model {model_name} retry: {e}")
-                        continue
-            except Exception as e:
-                logger.error(f"Secondary API summarization error: {e}. Falling back to local summarizer.")
-
-        # 3. Fallback to local offline summarizer
+        # Fallback to local offline summarizer
         return self._generate_local_summary(transcript)
 
     def _generate_local_summary(self, transcript: str) -> Dict[str, any]:
@@ -821,41 +859,10 @@ class LocalIntelligenceClient:
             "Cite the specific meeting titles and dates in your response. Keep the response concise, formatted in clean markdown."
         )
 
-        # 1. Check neural pipeline if key is configured
-        neural_key = getattr(settings, "GEMINI_API_KEY", "") or os.environ.get("GEMINI_API_KEY", "")
-        if neural_key:
-            logger.info("Answering transcript query via neural pipeline...")
-            try:
-                full_prompt = f"{system_prompt}\n\nContext Transcripts:\n{context_str}\n\nQuestion: {query}"
-                res_text = self._call_neural_completion(full_prompt, json_mode=False)
-                if res_text and res_text.strip():
-                    return res_text.strip()
-            except Exception as e:
-                logger.warning("Neural pipeline search query error, falling back to secondary pipelines...")
-
-        # 2. Check if secondary cloud assistant API is enabled
-        if settings.GROQ_API_KEY:
-            logger.info("Answering transcript query via cloud assistant API...")
-            try:
-                if self._client is None:
-                    self._client = Groq(api_key=settings.GROQ_API_KEY)
-
-                for model_name in ["llama-3.3-70b-specdec", "llama-3.1-8b-instant", "llama3-8b-8192"]:
-                    try:
-                        completion = self._client.chat.completions.create(
-                            messages=[
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": f"Context Transcripts:\n{context_str}\n\nQuestion: {query}"}
-                            ],
-                            model=model_name,
-                            temperature=0.3
-                        )
-                        return completion.choices[0].message.content
-                    except Exception as e:
-                        logger.warning(f"Secondary model {model_name} retry: {e}")
-                        continue
-            except Exception as e:
-                logger.error(f"Secondary API query error: {e}. Falling back to local offline search.")
+        full_prompt = f"{system_prompt}\n\nContext Transcripts:\n{context_str}\n\nQuestion: {query}"
+        res_text = self._call_llm_text(full_prompt, system_instruction=system_prompt)
+        if res_text and res_text.strip():
+            return res_text.strip()
 
         # 3. Fallback to local offline search
         return self._answer_local_transcript_question(query, context_transcripts)

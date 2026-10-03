@@ -58,10 +58,62 @@ class WhisperTranscriber:
             logger.error(f"Audio file not found for transcription: {file_path}")
             return "", []
             
-        self._load_model()
-        
         logger.info(f"Starting accelerated transcription of: {file_path}")
         start_time = time.time()
+
+        # ── 1. Groq Cloud Whisper Large V3 Acceleration ───────────────────
+        groq_key = getattr(settings, "GROQ_API_KEY", "") or os.environ.get("GROQ_API_KEY", "")
+        if groq_key:
+            try:
+                from groq import Groq
+                groq_client = Groq(api_key=groq_key)
+                logger.info(f"Transcribing '{file_path}' via Groq Cloud whisper-large-v3 (high accuracy)...")
+                with open(file_path, "rb") as af:
+                    transcription = groq_client.audio.transcriptions.create(
+                        file=(os.path.basename(file_path), af.read()),
+                        model="whisper-large-v3",
+                        response_format="verbose_json",
+                        temperature=0.0
+                    )
+                raw_segments = getattr(transcription, "segments", []) or []
+                segment_list = []
+                full_text_list = []
+                for s in raw_segments:
+                    s_start = getattr(s, "start", None) if not isinstance(s, dict) else s.get("start")
+                    s_end = getattr(s, "end", None) if not isinstance(s, dict) else s.get("end")
+                    s_text = (getattr(s, "text", "") if not isinstance(s, dict) else s.get("text", "")).strip()
+                    if not s_text:
+                        continue
+                    corrected = phonetic_corrector.correct_text(s_text)
+                    full_text_list.append(corrected)
+                    segment_list.append({
+                        "start": round(float(s_start or 0.0), 2),
+                        "end": round(float(s_end or 0.0), 2),
+                        "text": corrected,
+                        "speaker": "Speaker A"
+                    })
+                full_text = getattr(transcription, "text", " ".join(full_text_list)).strip()
+                if segment_list:
+                    # Diarize with AssemblyAI
+                    try:
+                        from app.transcription.diarizer import speaker_diarizer
+                        segment_list = speaker_diarizer.diarize_segments(
+                            file_path, segment_list, participant_names
+                        )
+                        if segment_list and "__aai_full_text__" in segment_list[0]:
+                            aai_text = segment_list[0].pop("__aai_full_text__")
+                            if aai_text and aai_text.strip():
+                                full_text = aai_text.strip()
+                    except Exception as e:
+                        logger.warning(f"Speaker diarization notice: {e}")
+                    duration = round(time.time() - start_time, 2)
+                    n_speakers = len(set(s.get("speaker", "") for s in segment_list))
+                    logger.info(f"Groq Cloud transcription complete in {duration}s — {len(segment_list)} segments, {n_speakers} speaker(s).")
+                    return full_text, segment_list
+            except Exception as e:
+                logger.warning(f"Groq Cloud transcription error: {e}. Falling back to local faster-whisper.")
+
+        self._load_model()
         
         try:
             segments, info = self.model.transcribe(

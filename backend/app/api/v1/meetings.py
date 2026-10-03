@@ -270,8 +270,13 @@ async def meeting_live_ws(
                         "is_final": bool(msg.get("is_final", False)),
                         "timestamp": msg.get("timestamp", datetime.utcnow().strftime("%H:%M:%S")),
                     }
-                    # Save final captions to meeting live buffer
+                    # Save final captions to meeting live buffer with AI punctuation & cleanup
                     if caption_payload["is_final"] and caption_payload["text"]:
+                        try:
+                            caption_payload["text"] = ai_client.clean_live_caption(caption_payload["text"])
+                        except Exception as e:
+                            logger.debug(f"Live caption polish notice: {e}")
+
                         if id not in active_live_transcripts:
                             active_live_transcripts[id] = []
                         active_live_transcripts[id].append(caption_payload)
