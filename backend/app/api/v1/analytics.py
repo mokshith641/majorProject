@@ -1,4 +1,5 @@
 from typing import Any, List, Dict
+import time
 from fastapi import APIRouter, Depends
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -12,6 +13,10 @@ from app.models.summary import Summary
 from app.ai.ai_client import ai_client
 
 router = APIRouter()
+
+# Simple TTL cache for AI analytics insights (keyed by user_id)
+_insights_cache: Dict[int, Dict] = {}  # {user_id: {"data": ..., "expires": float}}
+_INSIGHTS_CACHE_TTL = 300  # 5 minutes
 
 
 @router.get("/summary")
@@ -101,27 +106,33 @@ def get_analytics_summary(
         ]
 
     # 6. Synthesize AI Executive Insights across recent meetings
-    recent_meetings = (
-        db.query(Meeting)
-        .filter(Meeting.host_id == current_user.id, Meeting.status == "completed")
-        .order_by(Meeting.date.desc())
-        .limit(10)
-        .all()
-    )
+    # Check TTL cache first to avoid calling Gemini/Groq on every dashboard load
+    cached = _insights_cache.get(current_user.id)
+    if cached and cached.get("expires", 0) > time.time():
+        ai_insights = cached["data"]
+    else:
+        recent_meetings = (
+            db.query(Meeting)
+            .filter(Meeting.host_id == current_user.id, Meeting.status == "completed")
+            .order_by(Meeting.date.desc())
+            .limit(10)
+            .all()
+        )
 
-    history_payload = []
-    for m in recent_meetings:
-        summary_text = m.summary.key_points if m.summary else ""
-        focus = m.activity_logs[0].focus_score if m.activity_logs else 85.0
-        history_payload.append({
-            "title": m.title,
-            "date": m.date.strftime("%Y-%m-%d") if m.date else "",
-            "duration_seconds": m.duration_seconds or 0,
-            "focus_score": focus,
-            "summary": summary_text
-        })
+        history_payload = []
+        for m in recent_meetings:
+            summary_text = m.summary.key_points if m.summary else ""
+            focus = m.activity_logs[0].focus_score if m.activity_logs else 85.0
+            history_payload.append({
+                "title": m.title,
+                "date": m.date.strftime("%Y-%m-%d") if m.date else "",
+                "duration_seconds": m.duration_seconds or 0,
+                "focus_score": focus,
+                "summary": summary_text
+            })
 
-    ai_insights = ai_client.generate_analytics_insights(history_payload)
+        ai_insights = ai_client.generate_analytics_insights(history_payload)
+        _insights_cache[current_user.id] = {"data": ai_insights, "expires": time.time() + _INSIGHTS_CACHE_TTL}
 
     return {
         "totals": {

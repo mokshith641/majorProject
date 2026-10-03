@@ -227,10 +227,25 @@ class AssemblyAIDiarizer:
         )
 
         transcriber = aai.Transcriber(config=config)
-        transcript  = transcriber.transcribe(wav_path)
 
-        if transcript.status == aai.TranscriptStatus.error:
-            raise RuntimeError(f"AssemblyAI error: {transcript.error}")
+        # Retry up to 3 attempts with exponential backoff (H4 fix for transient upload failures)
+        import time as _time
+        transcript = None
+        last_err = None
+        for attempt in range(3):
+            try:
+                transcript = transcriber.transcribe(wav_path)
+                if transcript.status == aai.TranscriptStatus.error:
+                    raise RuntimeError(f"AssemblyAI error: {transcript.error}")
+                break
+            except Exception as e:
+                last_err = e
+                if attempt < 2:
+                    wait_sec = 2 ** attempt * 2  # 2s, 4s
+                    logger.warning(f"AssemblyAI attempt {attempt + 1} failed: {e}. Retrying in {wait_sec}s...")
+                    _time.sleep(wait_sec)
+                else:
+                    raise last_err
 
         utterances = transcript.utterances or []
         logger.info(

@@ -154,6 +154,28 @@ export const MeetingDetails: React.FC = () => {
     return `${m}m ${s}s`;
   };
 
+  // Assign deterministic speaker colors for transcript view (H2)
+  const SPEAKER_COLORS = ['#8ab4f8','#81c995','#f28b82','#fdd663','#d7aefb','#a8c7fa','#ff8bcb','#78d9ec'];
+  const speakerColorMap = new Map<string, string>();
+  const getSpeakerColor = (name: string): string => {
+    if (!speakerColorMap.has(name)) {
+      const idx = speakerColorMap.size % SPEAKER_COLORS.length;
+      speakerColorMap.set(name, SPEAKER_COLORS[idx]);
+    }
+    return speakerColorMap.get(name)!;
+  };
+
+  // Safe parser for action_items — handles both array and JSON string (H7)
+  const safeActionItems = (): ActionItem[] => {
+    const raw = meeting?.summary?.action_items;
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw === 'string') {
+      try { return JSON.parse(raw); } catch { return []; }
+    }
+    return [];
+  };
+
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       {/* Back button and Download actions */}
@@ -288,10 +310,10 @@ export const MeetingDetails: React.FC = () => {
               </h3>
               
               <div className="space-y-4">
-                {meeting.summary.action_items.length === 0 ? (
+                {safeActionItems().length === 0 ? (
                   <p className="text-[var(--text-muted)] text-sm">No action items logged.</p>
                 ) : (
-                  meeting.summary.action_items.map((item, idx) => (
+                  safeActionItems().map((item, idx) => (
                     <div key={idx} className="bg-[var(--bg-card-secondary)] p-4 rounded-xl border border-[var(--border-subtle)] space-y-2">
                       <p className="text-sm font-semibold text-[var(--text-primary)] leading-snug">{item.task}</p>
                       <div className="flex items-center justify-between text-xs text-[var(--text-secondary)]">
@@ -357,17 +379,20 @@ export const MeetingDetails: React.FC = () => {
               {meeting.transcript.raw_segments.length === 0 ? (
                 <p className="text-[var(--text-secondary)] text-sm leading-relaxed">{meeting.transcript.full_text}</p>
               ) : (
-                meeting.transcript.raw_segments.map((seg, idx) => (
-                  <div key={idx} className="flex gap-4 items-start bg-[var(--bg-card-secondary)] p-3.5 rounded-xl border border-[var(--border-subtle)]">
+                meeting.transcript.raw_segments.map((seg, idx) => {
+                  const speakerColor = getSpeakerColor(seg.speaker || 'Speaker');
+                  return (
+                  <div key={idx} className="flex gap-4 items-start bg-[var(--bg-card-secondary)] p-3.5 rounded-xl border border-[var(--border-subtle)]" style={{borderLeftColor: speakerColor, borderLeftWidth: '3px'}}>
                     <span className="bg-[#e8f0fe] text-[#174ea6] dark:bg-blue-900/30 dark:text-blue-400 font-mono text-xs px-2.5 py-1 rounded-md shrink-0 font-medium">
                       {seg.start}s - {seg.end}s
                     </span>
                     <div>
-                      <strong className="text-[var(--text-primary)] text-xs block mb-1 font-semibold">{seg.speaker}</strong>
+                      <strong className="text-xs block mb-1 font-semibold" style={{color: speakerColor}}>{seg.speaker}</strong>
                       <p className="text-[var(--text-secondary)] text-sm leading-relaxed">{seg.text}</p>
                     </div>
                   </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>

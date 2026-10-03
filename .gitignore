@@ -31,3 +31,5 @@ backend/whisper_models/
 backend/recordings/
 backend/reports/
 backend/temp/
+backend/app/monitoring/models/
+*.task

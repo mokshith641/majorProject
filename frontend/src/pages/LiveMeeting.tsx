@@ -114,6 +114,7 @@ export const LiveMeeting: React.FC = () => {
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
+  const [endStep, setEndStep] = useState<string>('');
 
   // Refs
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -317,139 +318,160 @@ export const LiveMeeting: React.FC = () => {
     const wsUrl = `${protocol}//${window.location.hostname}:8000/api/v1/meetings/${id}/ws${tokenParam}`;
 
     let ws: WebSocket;
-    try {
-      ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
+    let retries = 0;
+    let isClosed = false;
+    const maxRetries = 5;
 
-      ws.onopen = () => {
-        setWsConnected(true);
-      };
+    const connect = () => {
+      try {
+        ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
 
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
+        ws.onopen = () => {
+          setWsConnected(true);
+          retries = 0; // reset on successful connection
+        };
 
-          // ── Server assigns our identity and color on connect ──
-          if (data.type === 'participants_list') {
-            const serverParticipants: LiveParticipant[] = data.participants || [];
-            if (data.your_color) setMyColor(data.your_color);
-            if (data.your_user_id) setMyUserId(data.your_user_id);
-            // Merge: mark the current user's entry as local
-            setLiveParticipants(
-              serverParticipants.map(p => ({
-                ...p,
-                isLocal: p.user_id === data.your_user_id
-              }))
-            );
-          }
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
 
-          // ── Another participant joined ──
-          else if (data.type === 'participant_joined') {
-            const joined = data as { user_id: number; name: string; color: string; participants?: LiveParticipant[] };
-            if (joined.participants) {
-              setLiveParticipants(prev => {
-                const myId = myUserId || (data.your_user_id ?? 0);
-                return (joined.participants as LiveParticipant[]).map(p => ({
+            // ── Server assigns our identity and color on connect ──
+            if (data.type === 'participants_list') {
+              const serverParticipants: LiveParticipant[] = data.participants || [];
+              if (data.your_color) setMyColor(data.your_color);
+              if (data.your_user_id) setMyUserId(data.your_user_id);
+              // Merge: mark the current user's entry as local
+              setLiveParticipants(
+                serverParticipants.map(p => ({
                   ...p,
-                  isLocal: p.user_id === myId
-                }));
-              });
+                  isLocal: p.user_id === data.your_user_id
+                }))
+              );
             }
-            // System notification in chat
-            const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            setChatMessages(prev => [
-              ...prev,
-              {
-                id: `join-${Date.now()}`,
-                speaker: 'System',
-                text: `${joined.name} joined the meeting`,
-                time: timeStr,
-                isSystem: true
+
+            // ── Another participant joined ──
+            else if (data.type === 'participant_joined') {
+              const joined = data as { user_id: number; name: string; color: string; participants?: LiveParticipant[] };
+              if (joined.participants) {
+                setLiveParticipants(prev => {
+                  const myId = myUserId || (data.your_user_id ?? 0);
+                  return (joined.participants as LiveParticipant[]).map(p => ({
+                    ...p,
+                    isLocal: p.user_id === myId
+                  }));
+                });
               }
-            ]);
-          }
-
-          // ── A participant left ──
-          else if (data.type === 'participant_left') {
-            const left = data as { user_id: number; name: string; participants?: LiveParticipant[] };
-            if (left.participants) {
-              setLiveParticipants(prev => {
-                const myId = myUserId;
-                return (left.participants as LiveParticipant[]).map(p => ({
-                  ...p,
-                  isLocal: p.user_id === myId
-                }));
-              });
-            } else {
-              setLiveParticipants(prev => prev.filter(p => p.user_id !== left.user_id));
-            }
-            const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            setChatMessages(prev => [
-              ...prev,
-              {
-                id: `leave-${Date.now()}`,
-                speaker: 'System',
-                text: `${left.name} left the meeting`,
-                time: timeStr,
-                isSystem: true
-              }
-            ]);
-          }
-
-          // ── Live caption from any participant ──
-          else if (data.type === 'caption') {
-            setActiveCaption({
-              speaker: data.speaker,
-              text: data.text,
-              isInterim: !data.is_final,
-              timestamp: data.timestamp,
-              color: data.color,
-              user_id: data.user_id,
-            });
-
-            if (data.is_final && data.text?.trim()) {
-              setChatMessages((prev) => [
+              // System notification in chat
+              const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              setChatMessages(prev => [
                 ...prev,
                 {
-                  id: `cap-${Date.now()}-${Math.random()}`,
-                  speaker: data.speaker,
-                  text: data.text.trim(),
-                  time: data.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                  color: data.color,
+                  id: `join-${Date.now()}`,
+                  speaker: 'System',
+                  text: `${joined.name} joined the meeting`,
+                  time: timeStr,
+                  isSystem: true
                 }
               ]);
-
-              if (captionClearTimeoutRef.current) clearTimeout(captionClearTimeoutRef.current);
-              captionClearTimeoutRef.current = setTimeout(() => {
-                setActiveCaption((curr) => (curr?.text === data.text ? null : curr));
-              }, 4500);
             }
+
+            // ── A participant left ──
+            else if (data.type === 'participant_left') {
+              const left = data as { user_id: number; name: string; participants?: LiveParticipant[] };
+              if (left.participants) {
+                setLiveParticipants(prev => {
+                  const myId = myUserId;
+                  return (left.participants as LiveParticipant[]).map(p => ({
+                    ...p,
+                    isLocal: p.user_id === myId
+                  }));
+                });
+              } else {
+                setLiveParticipants(prev => prev.filter(p => p.user_id !== left.user_id));
+              }
+              const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              setChatMessages(prev => [
+                ...prev,
+                {
+                  id: `leave-${Date.now()}`,
+                  speaker: 'System',
+                  text: `${left.name} left the meeting`,
+                  time: timeStr,
+                  isSystem: true
+                }
+              ]);
+            }
+
+            // ── Live caption from any participant ──
+            else if (data.type === 'caption') {
+              setActiveCaption({
+                speaker: data.speaker,
+                text: data.text,
+                isInterim: !data.is_final,
+                timestamp: data.timestamp,
+                color: data.color,
+                user_id: data.user_id,
+              });
+
+              if (data.is_final && data.text?.trim()) {
+                setChatMessages((prev) => [
+                  ...prev,
+                  {
+                    id: `cap-${Date.now()}-${Math.random()}`,
+                    speaker: data.speaker,
+                    text: data.text.trim(),
+                    time: data.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    color: data.color,
+                  }
+                ]);
+
+                if (captionClearTimeoutRef.current) clearTimeout(captionClearTimeoutRef.current);
+                captionClearTimeoutRef.current = setTimeout(() => {
+                  setActiveCaption((curr) => (curr?.text === data.text ? null : curr));
+                }, 4500);
+              }
+            }
+
+            // ── Hand-raise event from a remote participant ──
+            else if (data.type === 'hand_raise') {
+              setLiveParticipants(prev =>
+                prev.map(p =>
+                  p.user_id === data.user_id
+                    ? { ...p, handRaised: data.raised }
+                    : p
+                )
+              );
+            }
+
+          } catch (e) {
+            console.warn('WebSocket message parsing error:', e);
           }
+        };
 
-          // ── Hand-raise event from a remote participant ──
-          else if (data.type === 'hand_raise') {
-            setLiveParticipants(prev =>
-              prev.map(p =>
-                p.user_id === data.user_id
-                  ? { ...p, handRaised: data.raised }
-                  : p
-              )
-            );
+        ws.onclose = () => {
+          setWsConnected(false);
+          if (!isClosed && retries < maxRetries) {
+            const delay = Math.min(1000 * Math.pow(2, retries), 16000);
+            retries++;
+            console.info(`WS disconnected. Reconnecting in ${delay}ms (attempt ${retries}/${maxRetries})...`);
+            setTimeout(connect, delay);
           }
+        };
 
-        } catch (e) {
-          console.warn("WebSocket message parsing error:", e);
-        }
-      };
+        ws.onerror = () => {
+          setWsConnected(false);
+        };
+      } catch (err) {
+        console.warn('WebSocket init failed:', err);
+        setWsConnected(false);
+      }
+    };
 
-      ws.onclose = () => setWsConnected(false);
-      ws.onerror = () => setWsConnected(false);
-    } catch (err) {
-      console.warn("WebSocket init failed:", err);
-      setWsConnected(false);
-    }
+    connect();
 
     return () => {
+      isClosed = true;
       if (ws) ws.close();
     };
   }, [id, token]);
@@ -686,11 +708,10 @@ export const LiveMeeting: React.FC = () => {
 
   const handleEndMeeting = async () => {
     setIsEnding(true);
+    setEndStep('Stopping recording devices…');
     try {
       if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch (e) {}
+        try { recognitionRef.current.stop(); } catch (e) {}
       }
       await api.post(`/meetings/${id}/end`);
       if (mediaStreamRef.current) {
@@ -699,10 +720,38 @@ export const LiveMeeting: React.FC = () => {
       if (screenStreamRef.current) {
         screenStreamRef.current.getTracks().forEach((track) => track.stop());
       }
-      navigate(`/meetings/${id}`);
+
+      // Poll processing status until done
+      let maxPollAttempts = 120; // max 2 minutes
+      const pollInterval = 2000; // every 2 seconds
+      setEndStep('Transcribing audio…');
+
+      const poll = async (): Promise<void> => {
+        if (maxPollAttempts <= 0) {
+          navigate(`/meetings/${id}`);
+          return;
+        }
+        maxPollAttempts--;
+        try {
+          const res = await api.get(`/meetings/${id}/processing-status`);
+          const { done, step } = res.data;
+          if (step) setEndStep(step);
+          if (done) {
+            navigate(`/meetings/${id}`);
+          } else {
+            setTimeout(poll, pollInterval);
+          }
+        } catch {
+          // If polling fails, just navigate after a short wait
+          setTimeout(() => navigate(`/meetings/${id}`), 3000);
+        }
+      };
+
+      setTimeout(poll, 1500);
     } catch (e) {
-      console.error("Error ending meeting:", e);
-      alert("Failed to compile meeting data. Please try again.");
+      console.error('Error ending meeting:', e);
+      setEndStep('');
+      alert('Failed to end meeting. Please try again.');
       setIsEnding(false);
     }
   };
@@ -722,6 +771,34 @@ export const LiveMeeting: React.FC = () => {
       ref={containerRef}
       className="fixed inset-0 z-50 bg-[#202124] text-white flex flex-col font-sans select-none overflow-hidden"
     >
+      {/* Processing overlay — shown while AI processes the ended meeting */}
+      {isEnding && (
+        <div className="absolute inset-0 z-[100] bg-[#202124]/95 backdrop-blur-sm flex flex-col items-center justify-center gap-6">
+          <div className="h-14 w-14 rounded-full border-4 border-[#1a73e8] border-t-transparent animate-spin" />
+          <div className="text-center space-y-2">
+            <p className="text-lg font-semibold text-white">Wrapping up your meeting</p>
+            <p className="text-sm text-slate-400 min-h-[20px] transition-all duration-300">{endStep || 'Please wait…'}</p>
+          </div>
+          <div className="flex gap-1.5">
+            {['Transcribing', 'Summarizing', 'Generating PDF'].map((step, i) => {
+              const isActive = endStep?.toLowerCase().includes(step.toLowerCase().split(' ')[0]);
+              const isDone = (
+                (step === 'Transcribing' && endStep?.toLowerCase().includes('summar')) ||
+                (step === 'Summarizing' && endStep?.toLowerCase().includes('pdf')) ||
+                (step === 'Generating PDF' && endStep === 'Complete')
+              );
+              return (
+                <div
+                  key={i}
+                  className={`h-2 w-16 rounded-full transition-all duration-500 ${
+                    isDone ? 'bg-emerald-500' : isActive ? 'bg-[#1a73e8] animate-pulse' : 'bg-[#3c4043]'
+                  }`}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
       {/* 1. Google Meet Top Header Bar */}
       <header className="h-14 px-6 flex items-center justify-between z-20 bg-[#202124]/90 backdrop-blur-xs border-b border-[#3c4043]/40">
         {/* Left: Meeting Title & Security Status */}

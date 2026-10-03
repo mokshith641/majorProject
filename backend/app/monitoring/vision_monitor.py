@@ -58,7 +58,7 @@ class VisionEngagementMonitor:
                         running_mode=RunningMode.IMAGE,
                         num_faces=1,
                         min_face_detection_confidence=0.5,
-                        min_face_presence_score=0.5,
+                        min_face_presence_confidence=0.5,
                         min_tracking_confidence=0.5,
                         output_face_blendshapes=False,
                         output_facial_transformation_matrixes=False,
