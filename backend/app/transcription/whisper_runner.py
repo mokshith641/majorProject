@@ -61,19 +61,22 @@ class WhisperTranscriber:
         logger.info(f"Starting accelerated transcription of: {file_path}")
         start_time = time.time()
 
-        # ── 1. Groq Cloud Whisper Large V3 Acceleration ───────────────────
+        # ── 1. Groq Cloud Whisper Large V3 Turbo Acceleration ─────────────
         groq_key = getattr(settings, "GROQ_API_KEY", "") or os.environ.get("GROQ_API_KEY", "")
         if groq_key:
             try:
                 from groq import Groq
+                from app.ai.providers.groq_provider import DEFAULT_DOMAIN_VOCABULARY
                 groq_client = Groq(api_key=groq_key)
-                logger.info(f"Transcribing '{file_path}' via Groq Cloud whisper-large-v3 (high accuracy)...")
+                prompt_ctx = ", ".join(DEFAULT_DOMAIN_VOCABULARY)[:800]
+                logger.info(f"Transcribing '{file_path}' via Groq Cloud whisper-large-v3-turbo (fast acceleration)...")
                 with open(file_path, "rb") as af:
                     transcription = groq_client.audio.transcriptions.create(
-                        file=(os.path.basename(file_path), af.read()),
-                        model="whisper-large-v3",
+                        file=(os.path.basename(file_path), af),
+                        model="whisper-large-v3-turbo",
                         response_format="verbose_json",
-                        temperature=0.0
+                        temperature=0.0,
+                        prompt=prompt_ctx,
                     )
                 raw_segments = getattr(transcription, "segments", []) or []
                 segment_list = []

@@ -11,8 +11,12 @@ class Transcript(Base):
     id = Column(Integer, primary_key=True, index=True)
     meeting_id = Column(Integer, ForeignKey("meetings.id", ondelete="CASCADE"), unique=True, nullable=False)
     full_text = Column(Text, nullable=False)
-    raw_segments = Column(JSON, default=list)  # List of dicts: {"start": float, "end": float, "text": str, "speaker": str}
+    raw_transcript = Column(Text, nullable=True)
+    cleaned_transcript = Column(Text, nullable=True)
+    raw_segments = Column(JSON, default=list)  # List of dicts: {"start": float, "end": float, "text": str, "speaker": str, "quality_flags": list, ...}
+    diagnostics = Column(JSON, default=dict)
     generated_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships
     meeting = relationship("Meeting", back_populates="transcript")
+

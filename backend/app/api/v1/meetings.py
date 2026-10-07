@@ -24,6 +24,8 @@ from app.reports.pdf_generator import generate_meeting_pdf
 from app.monitoring.input_monitor import activity_tracker
 from app.monitoring.vision_monitor import vision_monitor
 from app.websocket.connection_manager import manager
+from app.ai.services.meeting_pipeline import meeting_pipeline, pipeline_status_registry
+from app.ai.services.audio_preprocessor import AudioPreprocessor
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -379,99 +381,31 @@ def _process_meeting_background(
     idle_percent: float,
 ):
     """
-    Background task: runs STT, diarization, AI summary, and PDF generation
-    after meeting ends. Updates processing_status so frontend can poll progress.
-    Uses its own DB session (not the request session).
+    Background task: delegates post-meeting STT, AssemblyAI speaker diarization,
+    summarization, and PDF generation to the unified MeetingProcessingPipeline.
     """
     processing_status[meeting_id] = {"status": "processing", "step": "Transcribing audio…", "done": False}
-    db = SessionLocal()
     try:
-        meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
-        if not meeting:
-            return
-
-        # ── Step 1: Transcription ──────────────────────────────────────────
-        full_text, segments = transcriber.transcribe(wav_path, participant_names=participant_names)
-
-        # Auto-detect speakers from segments and add them as participants
-        detected_speakers = set(seg["speaker"] for seg in segments if seg.get("speaker"))
-        existing_participant_names = {p.name.lower() for p in meeting.participants}
-        if meeting.host:
-            existing_participant_names.add((meeting.host.full_name or "").lower())
-            existing_participant_names.add(meeting.host.email.lower())
-        for speaker in detected_speakers:
-            if speaker.lower() not in existing_participant_names and speaker.lower() not in ["unknown", "time", "speaker"]:
-                db.add(Participant(meeting_id=meeting_id, name=speaker, email=None))
-
-        # Enhance with live captions collected during the meeting
-        if live_caps:
-            caption_lines = [f"{c.get('speaker', 'Speaker')}: {c.get('text', '')}" for c in live_caps if c.get("text")]
-            if not full_text or full_text.strip() == "No audio recorded." or len(full_text.split()) < 5:
-                if caption_lines:
-                    full_text = "\n".join(caption_lines)
-                    segments = [
-                        {"speaker": c.get("speaker", "Speaker"), "text": c.get("text", ""), "start": i * 4, "end": (i + 1) * 4}
-                        for i, c in enumerate(live_caps) if c.get("text")
-                    ]
-            elif caption_lines:
-                full_text = full_text + "\n\n" + "\n".join(caption_lines)
-
-        if not full_text:
-            full_text = "No audio recorded."
-
-        db_transcript = Transcript(meeting_id=meeting_id, full_text=full_text, raw_segments=segments)
-        db.add(db_transcript)
-        db.commit()
-
-        # ── Step 2: AI Summarization ────────────────────────────────────────
-        processing_status[meeting_id]["step"] = "Generating AI summary…"
-        summary_data = ai_client.generate_summary(full_text)
-
-        # Auto-generate smart title if meeting title is generic
-        generic_titles = ["Active Meeting Session", "Google Meet Session", "New Meeting", "Untitled Meeting", "Scheduled Meeting"]
-        if meeting.title in generic_titles or meeting.title.startswith("Meeting #"):
-            smart_title = ai_client.generate_meeting_title(full_text)
-            if smart_title:
-                meeting.title = smart_title
-                db.add(meeting)
-
-        db_summary = Summary(
+        meeting_pipeline.execute_pipeline(
             meeting_id=meeting_id,
-            key_points=summary_data.get("key_points"),
-            decisions=summary_data.get("decisions"),
-            risks=summary_data.get("risks"),
-            next_steps=summary_data.get("next_steps"),
-            action_items=summary_data.get("action_items", [])
+            audio_path=wav_path,
+            mode="fast",
+            participant_names=participant_names,
+            live_caps=live_caps,
+            focus_score=focus_score,
+            idle_percent=idle_percent,
         )
-        db.add(db_summary)
-        db.commit()
-
-        # ── Step 3: PDF Report ──────────────────────────────────────────────
-        processing_status[meeting_id]["step"] = "Generating PDF report…"
-        pdf_filename = f"report_{meeting_id}.pdf"
-        pdf_path = os.path.join(settings.REPORTS_DIR, pdf_filename)
-        engagement_payload = {"focus_score": focus_score, "idle_percent": idle_percent}
-
-        pdf_success = generate_meeting_pdf(
-            meeting_title=meeting.title,
-            meeting_date=meeting.date,
-            duration_seconds=meeting.duration_seconds,
-            summary_data=summary_data,
-            engagement_metrics=engagement_payload,
-            output_path=pdf_path
-        )
-        if pdf_success:
-            db.add(Report(meeting_id=meeting_id, file_path=pdf_path))
-        db.commit()
-
-        processing_status[meeting_id] = {"status": "done", "step": "Complete", "done": True}
+        p_status = meeting_pipeline.get_status(meeting_id)
+        processing_status[meeting_id] = {
+            "status": "done" if p_status.get("done") else "processing",
+            "step": p_status.get("step", "Complete"),
+            "done": p_status.get("done", True),
+            "telemetry": p_status.get("telemetry", {}),
+        }
         logger.info(f"Background processing for meeting {meeting_id} complete.")
-
     except Exception as e:
         logger.error(f"Background meeting processing error for meeting {meeting_id}: {e}", exc_info=True)
         processing_status[meeting_id] = {"status": "error", "step": f"Error: {str(e)[:120]}", "done": True}
-    finally:
-        db.close()
 
 
 @router.post("/{id}/end", response_model=MeetingResponse)
@@ -557,26 +491,200 @@ def end_meeting(
 @router.get("/{id}/processing-status")
 def get_processing_status(
     id: int,
+    db: Session = Depends(get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ) -> Any:
-    """Poll the background processing status after ending a meeting."""
-    status = processing_status.get(id)
-    if status is None:
-        # Check if meeting is already fully processed (no entry = done or never started)
-        return {"status": "unknown", "step": "No active processing task.", "done": True}
+    """
+    Poll the background processing status for an uploaded or ended meeting.
+    Returns granular lifecycle state: QUEUED, UPLOADING, TRANSCRIBING,
+    DIARIZING, ALIGNING, ANALYZING, GENERATING_REPORT, COMPLETED, FAILED.
+    """
+    # Check master pipeline registry
+    status = meeting_pipeline.get_status(id)
+    if status.get("status") == "COMPLETED" or status.get("done") is True:
+        return status
+
+    # Check local end_meeting status map for backwards compatibility
+    legacy_status = processing_status.get(id)
+    if legacy_status:
+        return legacy_status
+
+    # Check database state if server restarted mid-task
+    meeting = db.query(Meeting).filter(Meeting.id == id).first()
+    if meeting:
+        if meeting.status == "completed":
+            return {
+                "meeting_id": id,
+                "status": "COMPLETED",
+                "progress": 100,
+                "step": "Meeting intelligence processing complete!",
+                "done": True,
+                "error": None,
+                "telemetry": {},
+            }
+        elif meeting.status == "failed":
+            return {
+                "meeting_id": id,
+                "status": "FAILED",
+                "progress": 0,
+                "step": "Processing failed.",
+                "done": True,
+                "error": "Meeting processing failed.",
+                "telemetry": {},
+            }
+
     return status
+
+
+@router.get("/{id}/debug/diarization")
+def debug_meeting_diarization(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+) -> Any:
+    """
+    Debug endpoint to inspect real AssemblyAI speaker diarization output,
+    transcript segment alignment, speaker counts, and raw audio metrics.
+    """
+    meeting = db.query(Meeting).filter(Meeting.id == id).first()
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    candidate_exts = [".wav", ".mp3", ".m4a", ".ogg", ".webm", ".flac"]
+    audio_path = None
+    for ext in candidate_exts:
+        p = os.path.join(settings.UPLOAD_DIR, f"meeting_{id}{ext}")
+        if os.path.exists(p):
+            audio_path = p
+            break
+
+    transcript = db.query(Transcript).filter(Transcript.meeting_id == id).first()
+    segments = transcript.raw_segments if transcript and transcript.raw_segments else []
+
+    detected_speakers_map = {}
+    for seg in segments:
+        spk_id = seg.get("speaker_id") or "A"
+        spk_name = seg.get("speaker_name") or seg.get("speaker") or "Participant 1"
+        if spk_id not in detected_speakers_map:
+            detected_speakers_map[spk_id] = {
+                "speaker_id": spk_id,
+                "speaker_name": spk_name,
+            }
+    detected_speakers = list(detected_speakers_map.values())
+
+    unique_speakers = list(dict.fromkeys(
+        seg.get("speaker_name") or seg.get("speaker") or "Unknown"
+        for seg in segments
+    ))
+
+    pipeline_status = meeting_pipeline.get_status(id)
+
+    from app.ai.providers.assemblyai_provider import AssemblyAIProvider
+    from app.ai.providers.groq_provider import GroqProvider
+
+    aai = AssemblyAIProvider()
+    groq = GroqProvider()
+
+    audio_exists = audio_path is not None and os.path.exists(audio_path)
+    audio_size = os.path.getsize(audio_path) if audio_exists else 0
+
+    return {
+        "detected_speakers": detected_speakers,
+        "segments": segments,
+        "meeting_id": id,
+        "meeting_title": meeting.title,
+        "meeting_status": meeting.status,
+        "duration_seconds": meeting.duration_seconds,
+        "audio": {
+            "found": audio_exists,
+            "path": audio_path,
+            "size_bytes": audio_size,
+        },
+        "providers": {
+            "assemblyai_available": aai.is_available(),
+            "assemblyai_key_configured": bool(getattr(settings, "ASSEMBLYAI_API_KEY", None)),
+            "groq_available": groq.is_available(),
+            "groq_key_configured": bool(getattr(settings, "GROQ_API_KEY", None)),
+        },
+        "diarization": {
+            "total_segments": len(segments),
+            "unique_speakers": unique_speakers,
+            "speaker_count": len(unique_speakers),
+            "sample_segments": segments[:10],
+        },
+        "full_transcript_preview": transcript.full_text[:500] if transcript and transcript.full_text else None,
+        "pipeline_status": pipeline_status,
+    }
+
+
+@router.post("/{id}/process")
+def trigger_meeting_processing(
+    id: int,
+    background_tasks: BackgroundTasks,
+    mode: str = "fast",
+    language: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+) -> Any:
+    """
+    Phase 12: Dedicated non-blocking endpoint to trigger or re-run processing on a meeting recording.
+    Returns immediately with {"meeting_id": id, "status": "queued"}.
+    """
+    meeting = db.query(Meeting).filter(Meeting.id == id).first()
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    # Locate meeting audio file
+    candidate_exts = [".wav", ".mp3", ".m4a", ".ogg", ".webm", ".flac"]
+    audio_path = None
+    for ext in candidate_exts:
+        p = os.path.join(settings.UPLOAD_DIR, f"meeting_{id}{ext}")
+        if os.path.exists(p):
+            audio_path = p
+            break
+
+    if not audio_path:
+        raise HTTPException(status_code=400, detail="No recorded audio file found for this meeting.")
+
+    meeting.status = "processing"
+    db.commit()
+
+    participant_names = []
+    if meeting.host:
+        participant_names.append(meeting.host.full_name or meeting.host.email)
+    for p in meeting.participants:
+        if p.name:
+            participant_names.append(p.name)
+
+    background_tasks.add_task(
+        meeting_pipeline.execute_pipeline,
+        meeting_id=meeting.id,
+        audio_path=audio_path,
+        mode=mode,
+        language=language,
+        participant_names=participant_names,
+    )
+
+    return {"meeting_id": meeting.id, "status": "queued"}
 
 
 @router.post("/{id}/upload-recording", response_model=MeetingResponse)
 @router.post("/{id}/upload-audio", response_model=MeetingResponse)
 async def upload_meeting_recording(
     id: int,
+    background_tasks: BackgroundTasks,
     file: Optional[UploadFile] = File(None),
     audio: Optional[UploadFile] = File(None),
+    mode: str = "fast",
+    language: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(deps.get_current_active_user)
+    current_user: User = Depends(deps.get_current_active_user),
 ) -> Any:
-    """Upload pre-recorded WAV or MP3 file directly. Runs STT, AI Summarizer, and exports PDF."""
+    """
+    Upload pre-recorded WAV or MP3 file directly.
+    Non-blocking: saves the audio file and dispatches processing to the background.
+    Returns immediately with meeting metadata while cloud AI processes in background.
+    """
     meeting = db.query(Meeting).filter(Meeting.id == id).first()
     if not meeting:
         raise HTTPException(status_code=404, detail="Meeting not found")
@@ -592,13 +700,13 @@ async def upload_meeting_recording(
     if not target_file:
         raise HTTPException(status_code=400, detail="Audio file is required. Please upload an audio file.")
 
-    # Save upload file
+    # Save uploaded audio file to disk
     orig_ext = os.path.splitext(target_file.filename or "")[1].lower()
     if orig_ext not in [".wav", ".mp3", ".m4a", ".ogg", ".webm", ".flac"]:
         orig_ext = ".wav"
     wav_filename = f"meeting_{meeting.id}{orig_ext}"
     wav_path = os.path.join(settings.UPLOAD_DIR, wav_filename)
-    
+
     try:
         with open(wav_path, "wb") as buffer:
             content = await target_file.read()
@@ -607,121 +715,43 @@ async def upload_meeting_recording(
         logger.error(f"Failed saving uploaded file: {e}")
         raise HTTPException(status_code=500, detail="Failed to save uploaded file.")
 
-    # Populate duration & telemetry estimates for direct file uploads
-    meeting.status = "completed"
+    # Calculate initial duration estimate
+    _, _, initial_duration = AudioPreprocessor.inspect_audio(wav_path)
+    meeting.duration_seconds = int(initial_duration) if initial_duration > 0 else 300
+    meeting.status = "processing"
 
-    # Speech file: will be measured after save; use content-length estimate for now
-    audio_duration_estimate = 300  # Will update after transcription provides actual duration
-    meeting.duration_seconds = audio_duration_estimate
-
-    # Generate realistic telemetry estimates from audio duration rather than hardcoded values
-    estimated_duration = meeting.duration_seconds
-    estimated_keyboard = max(10, int(estimated_duration * 0.4))  # ~0.4 keys/sec for active meetings
-    estimated_clicks = max(5, int(estimated_duration * 0.1))
-    estimated_idle = min(int(estimated_duration * 0.25), estimated_duration - 30)  # Max 25% idle
-    estimated_face = min(float(estimated_duration) * 0.85, float(estimated_duration))  # 85% face presence
-    estimated_gaze = 75.0 + (10.0 * (estimated_duration / max(300.0, estimated_duration)))  # Improves with duration
-    estimated_gaze = round(min(95.0, estimated_gaze), 1)
-    estimated_focus = round(min(95.0, (estimated_gaze * 0.7) + (75.0 * 0.3)), 1)
-
-    db_log = ActivityLog(
-        meeting_id=meeting.id,
-        user_id=current_user.id,
-        keyboard_hits=estimated_keyboard,
-        mouse_clicks=estimated_clicks,
-        idle_seconds=estimated_idle,
-        active_window="Audio Recording Upload",
-        face_present_seconds=estimated_face,
-        eye_attention_score=estimated_gaze,
-        focus_score=estimated_focus
-    )
-    db.add(db_log)
-
-    # Speech to text
-    # Fetch participant names for speaker diarization
     participant_names = []
     if meeting.host:
         participant_names.append(meeting.host.full_name or meeting.host.email)
     for p in meeting.participants:
         if p.name:
             participant_names.append(p.name)
-            
-    full_text, segments = transcriber.transcribe(wav_path, participant_names=participant_names)
-    
-    # Auto-detect speakers from segments and add them as participants if not already registered
-    detected_speakers = set(seg["speaker"] for seg in segments if seg.get("speaker"))
-    existing_participant_names = {p.name.lower() for p in meeting.participants}
-    if meeting.host:
-        existing_participant_names.add((meeting.host.full_name or "").lower())
-        existing_participant_names.add(meeting.host.email.lower())
-    for speaker in detected_speakers:
-        if speaker.lower() not in existing_participant_names and speaker.lower() not in ["unknown", "time", "speaker"]:
-            new_participant = Participant(
-                meeting_id=meeting.id,
-                name=speaker,
-                email=None
-            )
-            db.add(new_participant)
-            
-    if not full_text:
-        full_text = "No transcribable text captured."
 
-    db_transcript = Transcript(
-        meeting_id=meeting.id,
-        full_text=full_text,
-        raw_segments=segments
-    )
-    db.add(db_transcript)
-
-    # Generate AI summary and smart title
-    summary_data = ai_client.generate_summary(full_text)
-
-    # Auto-generate descriptive title if current title is generic
-    generic_titles = [
-        "Active Meeting Session", "Google Meet Session", "New Meeting",
-        "Untitled Meeting", "Scheduled Meeting"
-    ]
-    if meeting.title in generic_titles or meeting.title.startswith("Meeting #"):
-        smart_title = ai_client.generate_meeting_title(full_text)
-        if smart_title:
-            meeting.title = smart_title
-            db.add(meeting)
-
-    db_summary = Summary(
-        meeting_id=meeting.id,
-        key_points=summary_data.get("key_points"),
-        decisions=summary_data.get("decisions"),
-        risks=summary_data.get("risks"),
-        next_steps=summary_data.get("next_steps"),
-        action_items=summary_data.get("action_items", [])
-    )
-    db.add(db_summary)
-    
-    # Report compilation
-    pdf_filename = f"report_{meeting.id}.pdf"
-    pdf_path = os.path.join(settings.REPORTS_DIR, pdf_filename)
-    engagement_payload = {
-        "focus_score": 82.5,
-        "idle_percent": 20.0
-    }
-    
-    generate_meeting_pdf(
-        meeting_title=meeting.title,
-        meeting_date=meeting.date,
-        duration_seconds=meeting.duration_seconds,
-        summary_data=summary_data,
-        engagement_metrics=engagement_payload,
-        output_path=pdf_path
-    )
-    
-    db_commit_success = True
-    try:
-        db.commit()
-    except Exception as e:
-        logger.error(f"Failed to commit database transaction: {e}")
-        db_commit_success = False
-
+    db.commit()
     db.refresh(meeting)
+
+    # Initialize queue status
+    pipeline_status_registry[meeting.id] = {
+        "meeting_id": meeting.id,
+        "status": "QUEUED",
+        "progress": 10,
+        "step": "Audio uploaded successfully. Queued for AI processing...",
+        "error": None,
+        "telemetry": {"audio_duration_seconds": initial_duration},
+        "done": False,
+        "updated_at": time.time(),
+    }
+
+    # Dispatch to background task worker
+    background_tasks.add_task(
+        meeting_pipeline.execute_pipeline,
+        meeting_id=meeting.id,
+        audio_path=wav_path,
+        mode=mode,
+        language=language,
+        participant_names=participant_names,
+    )
+
     return meeting
 
 

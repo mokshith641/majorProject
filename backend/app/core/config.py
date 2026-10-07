@@ -22,7 +22,16 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     ASSEMBLYAI_API_KEY: str = ""
 
-    # Speech-to-Text Configurations
+    # Groq & Cloud Speech-to-Text Configurations
+    GROQ_TRANSCRIPTION_MODEL: str = "whisper-large-v3-turbo"
+    TRANSCRIPTION_LANGUAGE: str = "en"
+    MEETING_VOCABULARY_CONTEXT: str = (
+        "Technical engineering meeting discussing authentication, authorization, login, Gmail, "
+        "password, APIs, AI/ML, deployment, frontend, backend, database, PostgreSQL, SQLite, "
+        "FastAPI, React, Python, Groq, Gemini, AssemblyAI, keystroke, mouse telemetry, meeting assistant."
+    )
+
+    # Local Speech-to-Text Fallback Configurations
     WHISPER_MODEL_NAME: str = "tiny.en"
     WHISPER_DEVICE: str = "cpu"
     WHISPER_COMPUTE_TYPE: str = "int8"

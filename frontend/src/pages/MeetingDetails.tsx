@@ -26,7 +26,10 @@ interface TranscriptSegment {
   start: number;
   end: number;
   text: string;
-  speaker: string;
+  speaker?: string;
+  speaker_name?: string;
+  speaker_id?: string;
+  confidence?: number;
 }
 
 interface TranscriptData {
@@ -380,14 +383,22 @@ export const MeetingDetails: React.FC = () => {
                 <p className="text-[var(--text-secondary)] text-sm leading-relaxed">{meeting.transcript.full_text}</p>
               ) : (
                 meeting.transcript.raw_segments.map((seg, idx) => {
-                  const speakerColor = getSpeakerColor(seg.speaker || 'Speaker');
+                  const speakerDisplay = seg.speaker_name || seg.speaker || 'Participant';
+                  const speakerColor = getSpeakerColor(speakerDisplay);
                   return (
                   <div key={idx} className="flex gap-4 items-start bg-[var(--bg-card-secondary)] p-3.5 rounded-xl border border-[var(--border-subtle)]" style={{borderLeftColor: speakerColor, borderLeftWidth: '3px'}}>
                     <span className="bg-[#e8f0fe] text-[#174ea6] dark:bg-blue-900/30 dark:text-blue-400 font-mono text-xs px-2.5 py-1 rounded-md shrink-0 font-medium">
                       {seg.start}s - {seg.end}s
                     </span>
-                    <div>
-                      <strong className="text-xs block mb-1 font-semibold" style={{color: speakerColor}}>{seg.speaker}</strong>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <strong className="text-xs font-semibold" style={{color: speakerColor}}>{speakerDisplay}</strong>
+                        {seg.confidence && (
+                          <span className="text-[10px] text-[var(--text-muted)] font-mono">
+                            {Math.round(seg.confidence * 100)}% match
+                          </span>
+                        )}
+                      </div>
                       <p className="text-[var(--text-secondary)] text-sm leading-relaxed">{seg.text}</p>
                     </div>
                   </div>

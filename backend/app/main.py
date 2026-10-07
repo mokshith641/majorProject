@@ -1,4 +1,5 @@
 import logging
+import os
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -15,6 +16,17 @@ try:
     # Import all models to ensure metadata registration
     from app.database import base  # noqa
     Base.metadata.create_all(bind=engine)
+    
+    # Ensure new columns exist in transcripts table for SQLite
+    with engine.connect() as conn:
+        from sqlalchemy import text
+        for col_name, col_type in [("raw_transcript", "TEXT"), ("cleaned_transcript", "TEXT"), ("diagnostics", "JSON")]:
+            try:
+                conn.execute(text(f"ALTER TABLE transcripts ADD COLUMN {col_name} {col_type}"))
+                conn.commit()
+            except Exception:
+                pass  # Column already exists
+
     logger.info("Database tables initialized successfully.")
 except Exception as e:
     logger.error(f"Error initializing database tables: {e}")
@@ -65,13 +77,17 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 
 @app.on_event("startup")
 def warmup_services():
-    """Pre-warm Whisper model in a background thread to prevent first-request cold start."""
+    """Verify AI providers on startup and lazily load local fallback only if cloud key is missing."""
     import threading
     def _warmup():
         try:
-            from app.transcription.whisper_runner import transcriber
-            transcriber._load_model()
-            logger.info("Whisper model pre-warmed and resident in memory.")
+            groq_key = getattr(settings, "GROQ_API_KEY", "") or os.environ.get("GROQ_API_KEY", "")
+            if groq_key:
+                logger.info("Groq Cloud Whisper API configured as primary STT engine. Local faster-whisper held in standby.")
+            else:
+                from app.transcription.whisper_runner import transcriber
+                transcriber._load_model()
+                logger.info("Whisper local model pre-warmed for offline operation.")
         except Exception as e:
             logger.warning(f"Whisper warmup notice: {e}")
     threading.Thread(target=_warmup, daemon=True).start()
