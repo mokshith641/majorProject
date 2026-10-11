@@ -67,27 +67,27 @@ export const Settings: React.FC = () => {
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
-      <div className="flex items-center gap-3">
-        <div className="h-10 w-10 bg-[#e8f0fe] text-[#1a73e8] dark:bg-blue-900/30 dark:text-blue-400 rounded-lg flex items-center justify-center">
+      <div className="flex items-center gap-3.5">
+        <div className="h-11 w-11 bg-[var(--bg-elevated)] text-[var(--color-brand)] border border-[var(--border-subtle)] rounded-xl flex items-center justify-center shrink-0">
           <SettingsIcon className="h-5 w-5" />
         </div>
         <div>
-          <h2 className="text-xl font-bold text-[var(--text-primary)]">System Settings</h2>
-          <p className="text-[var(--text-secondary)] text-sm">Customize visual themes, hardware inputs, and AI credentials</p>
+          <h2 className="text-[20px] sm:text-[22px] font-semibold text-[var(--text-primary)] tracking-tight">System Settings</h2>
+          <p className="text-[14px] text-[var(--text-secondary)] mt-0.5">Customize visual themes, hardware inputs, and AI credentials</p>
         </div>
       </div>
 
       {success && (
-        <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 p-4 rounded-xl text-sm">
-          <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+        <div className="flex items-center gap-2.5 bg-[var(--color-success-bg)] border border-[var(--color-success)]/30 text-[var(--color-success)] p-4 rounded-xl text-[14px] font-medium">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
           <span>Configurations updated and saved successfully!</span>
         </div>
       )}
 
-      <form onSubmit={handleSave} className="glass-card rounded-2xl p-6 sm:p-8 space-y-6">
+      <form onSubmit={handleSave} className="card-enterprise p-6 sm:p-8 space-y-6">
         {/* Visual Theme Customization Cards */}
         <div className="space-y-3">
-          <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+          <label className="block text-[13px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
             UI Theme Customization
           </label>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
@@ -96,23 +96,23 @@ export const Settings: React.FC = () => {
               onClick={() => handleThemeChange('light')}
               className={`p-4 rounded-xl border-2 cursor-pointer transition-all flex items-start gap-3.5 ${
                 selectedTheme === 'light'
-                  ? 'border-[#1a73e8] bg-[#e8f0fe]/40 shadow-xs'
-                  : 'border-[var(--border-subtle)] hover:border-[var(--border-strong)] bg-[var(--bg-surface)]'
+                  ? 'border-[var(--color-brand)] bg-[var(--color-brand-light)] shadow-xs'
+                  : 'border-[var(--border-subtle)] hover:border-[var(--border-strong)] bg-[var(--bg-card)]'
               }`}
             >
-              <div className="h-10 w-10 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-amber-500 shadow-xs shrink-0">
+              <div className="h-10 w-10 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-subtle)] flex items-center justify-center text-[var(--color-warning)] shadow-xs shrink-0">
                 <Sun className="h-5 w-5" />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-sm font-semibold text-slate-900">Google Meet Light</h4>
+                  <h4 className="text-[14px] font-semibold text-[var(--text-primary)]">Enterprise Light</h4>
                   {selectedTheme === 'light' && (
-                    <span className="h-5 w-5 rounded-full bg-[#1a73e8] text-white flex items-center justify-center text-xs">
+                    <span className="h-5 w-5 rounded-full bg-[var(--color-brand)] text-white flex items-center justify-center text-xs">
                       <Check className="h-3 w-3" />
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-slate-500 mt-1">Clean off-white canvas with Google Blue accents</p>
+                <p className="text-[12px] text-[var(--text-secondary)] mt-1">Clean off-white canvas with crisp neutral borders</p>
               </div>
             </div>
 
@@ -121,23 +121,23 @@ export const Settings: React.FC = () => {
               onClick={() => handleThemeChange('dark')}
               className={`p-4 rounded-xl border-2 cursor-pointer transition-all flex items-start gap-3.5 ${
                 selectedTheme === 'dark'
-                  ? 'border-[#3b82f6] bg-blue-950/20 shadow-xs'
-                  : 'border-[var(--border-subtle)] hover:border-[var(--border-strong)] bg-[var(--bg-surface)]'
+                  ? 'border-[var(--color-brand)] bg-[var(--bg-elevated)] shadow-xs'
+                  : 'border-[var(--border-subtle)] hover:border-[var(--border-strong)] bg-[var(--bg-card)]'
               }`}
             >
-              <div className="h-10 w-10 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center text-indigo-400 shadow-xs shrink-0">
+              <div className="h-10 w-10 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-subtle)] flex items-center justify-center text-[var(--color-brand)] shadow-xs shrink-0">
                 <Moon className="h-5 w-5" />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-sm font-semibold text-[var(--text-primary)]">Dark Slate</h4>
+                  <h4 className="text-[14px] font-semibold text-[var(--text-primary)]">Graphite Dark</h4>
                   {selectedTheme === 'dark' && (
-                    <span className="h-5 w-5 rounded-full bg-[#3b82f6] text-white flex items-center justify-center text-xs">
+                    <span className="h-5 w-5 rounded-full bg-[var(--color-brand)] text-white flex items-center justify-center text-xs">
                       <Check className="h-3 w-3" />
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-[var(--text-secondary)] mt-1">Sleek low-light contrast for low eye strain</p>
+                <p className="text-[12px] text-[var(--text-secondary)] mt-1">Neutral graphite & charcoal palette for maximum clarity</p>
               </div>
             </div>
           </div>
@@ -146,13 +146,13 @@ export const Settings: React.FC = () => {
         {/* Hardware Devices */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
           <div className="space-y-2">
-            <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+            <label className="block text-[13px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
               Input Microphone
             </label>
             <select
               value={audioDevice}
               onChange={(e) => setAudioDevice(e.target.value)}
-              className="w-full bg-[var(--bg-input)] border border-[var(--border-strong)] text-[var(--text-primary)] rounded-lg px-3.5 py-2.5 text-sm outline-none focus:border-[#1a73e8] transition-colors"
+              className="input-enterprise py-2.5 text-[14px]"
             >
               <option value="">Default Microphone</option>
               <option value="built_in">Internal Array Mic</option>
@@ -161,13 +161,13 @@ export const Settings: React.FC = () => {
           </div>
 
           <div className="space-y-2">
-            <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+            <label className="block text-[13px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
               Engagement Webcam
             </label>
             <select
               value={videoDevice}
               onChange={(e) => setVideoDevice(e.target.value)}
-              className="w-full bg-[var(--bg-input)] border border-[var(--border-strong)] text-[var(--text-primary)] rounded-lg px-3.5 py-2.5 text-sm outline-none focus:border-[#1a73e8] transition-colors"
+              className="input-enterprise py-2.5 text-[14px]"
             >
               <option value="">Default Camera</option>
               <option value="integrated">Integrated HD Camera</option>
@@ -178,13 +178,13 @@ export const Settings: React.FC = () => {
 
         {/* API Credentials */}
         <div className="space-y-4 border-t border-[var(--border-subtle)] pt-6">
-          <h3 className="text-sm font-bold text-[var(--text-primary)] flex items-center gap-2">
-            <ShieldKeyhole className="h-4 w-4 text-[#1a73e8] dark:text-blue-400" />
+          <h3 className="text-[15px] font-semibold text-[var(--text-primary)] flex items-center gap-2">
+            <ShieldKeyhole className="h-4 w-4 text-[var(--color-brand)]" />
             AI Developer Credentials
           </h3>
           
           <div className="space-y-2">
-            <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+            <label className="block text-[13px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
               Groq Cloud API Key
             </label>
             <input
@@ -192,10 +192,10 @@ export const Settings: React.FC = () => {
               value={groqKey}
               onChange={(e) => setGroqKey(e.target.value)}
               placeholder="e.g. gsk_..."
-              className="w-full bg-[var(--bg-input)] border border-[var(--border-strong)] text-[var(--text-primary)] rounded-lg px-4 py-2.5 text-sm outline-none focus:border-[#1a73e8] transition-colors"
+              className="input-enterprise py-2.5 text-[14px]"
             />
-            <p className="text-[11px] text-[var(--text-muted)] leading-normal">
-              Used to query Llama 3.1 8B Instant. You can retrieve a free developer key from console.groq.com.
+            <p className="text-[12px] text-[var(--text-muted)] leading-normal">
+              Used to query Whisper Large V3 and Llama 3 models. You can retrieve a free developer key from console.groq.com.
             </p>
           </div>
         </div>
@@ -203,7 +203,7 @@ export const Settings: React.FC = () => {
         <button
           type="submit"
           disabled={isSaving}
-          className="w-full py-3 bg-[#1a73e8] hover:bg-[#1967d2] disabled:opacity-50 text-white font-medium rounded-xl shadow-sm hover:shadow-md transition-all text-sm flex items-center justify-center gap-2 cursor-pointer"
+          className="btn-primary w-full py-2.5 text-[14px] disabled:opacity-50 cursor-pointer gap-2"
         >
           {isSaving ? (
             <>

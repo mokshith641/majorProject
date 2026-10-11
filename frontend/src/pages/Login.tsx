@@ -47,29 +47,26 @@ export const Login: React.FC = () => {
   };
 
   return (
-    <div className="w-full max-w-md glass-card rounded-2xl p-8 shadow-xl relative overflow-hidden">
-      {/* Google decorative top accent */}
-      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#1a73e8] via-[#34a853] to-[#fbbc05]"></div>
-
-      <div className="mb-8 text-center">
-        <h2 className="text-2xl font-bold text-[var(--text-primary)] mb-2">Welcome Back</h2>
-        <p className="text-[var(--text-secondary)] text-sm">Access your meeting intelligence dashboard</p>
+    <div className="w-full max-w-md card-enterprise p-8 space-y-6 shadow-md">
+      <div className="text-center">
+        <h2 className="text-[24px] font-semibold text-[var(--text-primary)] tracking-tight">Welcome Back</h2>
+        <p className="text-[14px] text-[var(--text-secondary)] mt-1">Access your meeting intelligence dashboard</p>
       </div>
 
       {errorMsg && (
-        <div className="flex items-center gap-2 bg-rose-50 text-rose-700 dark:bg-rose-950/20 dark:text-rose-300 border border-rose-200 dark:border-rose-900/50 p-3.5 rounded-xl text-sm mb-6">
+        <div className="badge-error w-full p-3 rounded-lg text-[13px] flex items-center gap-2">
           <AlertCircle className="h-4 w-4 shrink-0" />
           <span>{errorMsg}</span>
         </div>
       )}
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         <div>
-          <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-2">
+          <label className="block text-[13px] font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-2">
             Email Address
           </label>
           <div className="relative">
-            <Mail className="absolute left-3.5 top-3.5 h-4 w-4 text-[var(--text-muted)]" />
+            <Mail className="absolute left-3.5 top-3 h-4 w-4 text-[var(--text-muted)]" />
             <input
               type="email"
               {...register('email', {
@@ -80,42 +77,42 @@ export const Login: React.FC = () => {
                 },
               })}
               placeholder="you@example.com"
-              className="w-full bg-[var(--bg-input)] border border-[var(--border-strong)] focus:border-[#1a73e8] text-[var(--text-primary)] rounded-xl pl-10 pr-4 py-2.5 text-sm transition-all outline-none"
+              className="input-enterprise pl-10 pr-4 py-2.5 text-[14px]"
             />
           </div>
-          {errors.email && <p className="text-rose-600 dark:text-rose-400 text-xs mt-1">{errors.email.message}</p>}
+          {errors.email && <p className="text-[var(--color-error)] text-[12px] mt-1">{errors.email.message}</p>}
         </div>
 
         <div>
           <div className="flex items-center justify-between mb-2">
-            <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+            <label className="block text-[13px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
               Password
             </label>
             <Link
               to={PATHS.FORGOT_PASSWORD}
-              className="text-xs text-[#1a73e8] hover:text-[#1967d2] font-medium transition-colors"
+              className="text-[13px] text-[var(--color-brand)] hover:text-[var(--color-brand-hover)] font-medium transition-colors"
             >
               Forgot?
             </Link>
           </div>
           <div className="relative">
-            <Lock className="absolute left-3.5 top-3.5 h-4 w-4 text-[var(--text-muted)]" />
+            <Lock className="absolute left-3.5 top-3 h-4 w-4 text-[var(--text-muted)]" />
             <input
               type="password"
               {...register('password', {
                 required: 'Password is required',
               })}
               placeholder="••••••••"
-              className="w-full bg-[var(--bg-input)] border border-[var(--border-strong)] focus:border-[#1a73e8] text-[var(--text-primary)] rounded-xl pl-10 pr-4 py-2.5 text-sm transition-all outline-none"
+              className="input-enterprise pl-10 pr-4 py-2.5 text-[14px]"
             />
           </div>
-          {errors.password && <p className="text-rose-600 dark:text-rose-400 text-xs mt-1">{errors.password.message}</p>}
+          {errors.password && <p className="text-[var(--color-error)] text-[12px] mt-1">{errors.password.message}</p>}
         </div>
 
         <button
           type="submit"
           disabled={isSubmitting}
-          className="w-full py-3 bg-[#1a73e8] hover:bg-[#1967d2] disabled:opacity-50 text-white font-medium rounded-xl shadow-xs hover:shadow-md transition-all text-sm flex items-center justify-center gap-2 mt-4 cursor-pointer"
+          className="btn-primary w-full py-2.5 text-[14px] disabled:opacity-50 mt-4 cursor-pointer gap-2"
         >
           {isSubmitting ? (
             <>
@@ -128,9 +125,9 @@ export const Login: React.FC = () => {
         </button>
       </form>
 
-      <div className="mt-8 text-center text-sm text-[var(--text-secondary)]">
-        Don't have an account?{' '}
-        <Link to={PATHS.REGISTER} className="text-[#1a73e8] hover:text-[#1967d2] font-semibold transition-colors">
+      <div className="text-center text-[14px] text-[var(--text-secondary)] pt-2 border-t border-[var(--border-subtle)]">
+        Don&apos;t have an account?{' '}
+        <Link to={PATHS.REGISTER} className="text-[var(--color-brand)] hover:text-[var(--color-brand-hover)] font-semibold transition-colors">
           Get Started
         </Link>
       </div>

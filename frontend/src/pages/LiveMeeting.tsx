@@ -213,7 +213,7 @@ export const LiveMeeting: React.FC = () => {
           // User avatar circle
           ctx.beginPath();
           ctx.arc(320, 160, 55, 0, Math.PI * 2);
-          ctx.fillStyle = '#1a73e8';
+          ctx.fillStyle = '#3478F6';
           ctx.fill();
           
           // User initial letter
@@ -774,24 +774,26 @@ export const LiveMeeting: React.FC = () => {
       {/* Processing overlay — shown while AI processes the ended meeting */}
       {isEnding && (
         <div className="absolute inset-0 z-[100] bg-[#202124]/95 backdrop-blur-sm flex flex-col items-center justify-center gap-6">
-          <div className="h-14 w-14 rounded-full border-4 border-[#1a73e8] border-t-transparent animate-spin" />
+          <div className="h-14 w-14 rounded-full border-4 border-[var(--color-brand)] border-t-transparent animate-spin" />
           <div className="text-center space-y-2">
             <p className="text-lg font-semibold text-white">Wrapping up your meeting</p>
             <p className="text-sm text-slate-400 min-h-[20px] transition-all duration-300">{endStep || 'Please wait…'}</p>
           </div>
           <div className="flex gap-1.5">
-            {['Transcribing', 'Summarizing', 'Generating PDF'].map((step, i) => {
-              const isActive = endStep?.toLowerCase().includes(step.toLowerCase().split(' ')[0]);
-              const isDone = (
-                (step === 'Transcribing' && endStep?.toLowerCase().includes('summar')) ||
-                (step === 'Summarizing' && endStep?.toLowerCase().includes('pdf')) ||
-                (step === 'Generating PDF' && endStep === 'Complete')
-              );
+            {['Upload', 'Transcribe', 'Diarize', 'Align', 'Clean', 'Summary', 'PDF'].map((step, i) => {
+              const currentStepLower = (endStep || '').toLowerCase();
+              const stepKey = step.toLowerCase();
+              const isActive = currentStepLower.includes(stepKey);
+              const stagesOrder = ['upload', 'transcrib', 'diariz', 'align', 'clean', 'summar', 'pdf', 'complete'];
+              const currentStageIdx = stagesOrder.findIndex(s => currentStepLower.includes(s));
+              const thisStageIdx = i;
+              const isDone = currentStageIdx > thisStageIdx || currentStepLower === 'complete';
               return (
                 <div
                   key={i}
-                  className={`h-2 w-16 rounded-full transition-all duration-500 ${
-                    isDone ? 'bg-emerald-500' : isActive ? 'bg-[#1a73e8] animate-pulse' : 'bg-[#3c4043]'
+                  title={step}
+                  className={`h-2 w-8 sm:w-12 rounded-full transition-all duration-500 ${
+                    isDone ? 'bg-emerald-500' : isActive ? 'bg-[var(--color-brand)] animate-pulse' : 'bg-[#3c4043]'
                   }`}
                 />
               );
@@ -870,7 +872,7 @@ export const LiveMeeting: React.FC = () => {
             {/* Video-Off Google Meet Style Avatar Placeholder */}
             {isVideoOff && (
               <div className="flex flex-col items-center justify-center space-y-4">
-                <div className="h-28 w-28 rounded-full bg-[#1a73e8] text-white flex items-center justify-center text-5xl font-bold shadow-xl border-4 border-white/10">
+                <div className="h-28 w-28 rounded-full bg-[var(--color-brand)] text-white flex items-center justify-center text-5xl font-bold shadow-xl border-4 border-white/10">
                   {(currentSpeakerName[0] || 'U').toUpperCase()}
                 </div>
                 <p className="text-sm font-medium text-slate-300">{currentSpeakerName}</p>
@@ -908,7 +910,7 @@ export const LiveMeeting: React.FC = () => {
                 </span>
               )}
               {isScreenSharing && (
-                <span className="flex items-center gap-1.5 bg-[#1a73e8] text-white text-xs px-2.5 py-1 rounded-full shadow-lg font-medium">
+                <span className="flex items-center gap-1.5 bg-[var(--color-brand)] text-white text-xs px-2.5 py-1 rounded-full shadow-lg font-medium">
                   <ScreenShare className="h-3.5 w-3.5" />
                   Sharing screen
                 </span>
@@ -1033,7 +1035,7 @@ export const LiveMeeting: React.FC = () => {
                           console.warn("Catch-up notice:", e);
                         }
                       }}
-                      className="flex items-center gap-1.5 bg-[#1a73e8]/25 hover:bg-[#1a73e8]/40 border border-[#1a73e8]/50 text-[#8ab4f8] px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer"
+                      className="flex items-center gap-1.5 bg-[var(--color-brand)]/20 hover:bg-[var(--color-brand)]/35 border border-[var(--color-brand)]/40 text-blue-300 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer"
                     >
                       <span>AI Catch-Up</span>
                     </button>
@@ -1076,7 +1078,7 @@ export const LiveMeeting: React.FC = () => {
                     <button
                       type="submit"
                       disabled={!chatInput.trim()}
-                      className="p-2 bg-[#1a73e8] hover:bg-[#185abc] disabled:opacity-40 text-white rounded-full transition-all cursor-pointer"
+                      className="p-2 bg-[var(--color-brand)] hover:bg-[var(--color-brand-hover)] disabled:opacity-40 text-white rounded-full transition-all cursor-pointer"
                     >
                       <Send className="h-3.5 w-3.5" />
                     </button>
@@ -1210,7 +1212,7 @@ export const LiveMeeting: React.FC = () => {
                     </p>
                     <button
                       onClick={handleCopyLink}
-                      className="w-full flex items-center justify-center gap-2 bg-[#1a73e8]/20 hover:bg-[#1a73e8]/30 text-[#8ab4f8] py-1.5 rounded-lg font-medium transition-colors cursor-pointer"
+                      className="w-full flex items-center justify-center gap-2 bg-[var(--color-brand)]/20 hover:bg-[var(--color-brand)]/30 text-blue-300 py-1.5 rounded-lg font-medium transition-colors cursor-pointer"
                     >
                       {copiedLink ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
                       <span>{copiedLink ? 'Link Copied' : 'Copy joining link'}</span>
@@ -1311,7 +1313,7 @@ export const LiveMeeting: React.FC = () => {
             onClick={toggleScreenShare}
             className={`h-12 w-12 rounded-full flex items-center justify-center transition-all shadow-md cursor-pointer ${
               isScreenSharing
-                ? 'bg-[#1a73e8] text-white hover:bg-[#185abc]'
+                ? 'bg-[var(--color-brand)] text-white hover:bg-[var(--color-brand-hover)]'
                 : 'bg-[#3c4043] text-white hover:bg-[#43474b]'
             }`}
             title={isScreenSharing ? 'Stop presenting' : 'Present now'}
@@ -1391,7 +1393,7 @@ export const LiveMeeting: React.FC = () => {
             title="People"
           >
             <Users className="h-5 w-5" />
-            <span className="absolute top-1.5 right-1.5 h-3.5 w-3.5 rounded-full bg-[#1a73e8] text-[9px] font-bold flex items-center justify-center text-white">
+            <span className="absolute top-1.5 right-1.5 h-3.5 w-3.5 rounded-full bg-[var(--color-brand)] text-[9px] font-bold flex items-center justify-center text-white">
               {liveParticipants.length || 1}
             </span>
           </button>

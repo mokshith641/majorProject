@@ -76,20 +76,48 @@ class GroqProvider:
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
         client = self._get_client()
-        model_name = "whisper-large-v3-turbo" if mode != "accurate" else "whisper-large-v3"
+        # Allow dynamic model selection via settings/env without changing source code
+        configured_model = (
+            getattr(settings, "GROQ_TRANSCRIPTION_MODEL", "")
+            or os.environ.get("GROQ_TRANSCRIPTION_MODEL", "")
+        )
+        if configured_model and configured_model.strip():
+            model_name = configured_model.strip()
+        else:
+            model_name = "whisper-large-v3-turbo" if mode != "accurate" else "whisper-large-v3"
         
-        # Build prompt context from domain vocabulary
+        # Build prompt context from domain vocabulary and configurable settings
         prompt_vocab = list(DEFAULT_DOMAIN_VOCABULARY)
+        config_context = (
+            getattr(settings, "MEETING_VOCABULARY_CONTEXT", "")
+            or os.environ.get("MEETING_VOCABULARY_CONTEXT", "")
+        )
+        if config_context:
+            prompt_vocab.extend([w.strip() for w in config_context.split(",") if w.strip()])
         if custom_prompt:
             prompt_vocab.append(custom_prompt)
-        prompt_str = ", ".join(prompt_vocab)[:800]  # Groq prompt limit safety
+
+        # Deduplicate while preserving sequence
+        seen_terms = set()
+        deduped = []
+        for term in prompt_vocab:
+            t_low = term.lower()
+            if t_low not in seen_terms:
+                seen_terms.add(t_low)
+                deduped.append(term)
+        prompt_str = ", ".join(deduped)[:800]  # Groq prompt limit safety
+
+        # Configure language: allow explicit language or 'auto' for multilingual detection
+        effective_language = language or getattr(settings, "TRANSCRIPTION_LANGUAGE", "en")
+        if effective_language and effective_language.lower() in ["auto", "none", ""]:
+            effective_language = None
 
         last_error = None
         for attempt in range(retries + 1):
             try:
                 logger.info(
                     f"[GroqProvider] Transcribing '{os.path.basename(audio_path)}' with model '{model_name}' "
-                    f"(language={language or 'auto'}, attempt {attempt + 1})..."
+                    f"(language={effective_language or 'auto'}, attempt {attempt + 1})..."
                 )
                 start_t = time.time()
                 with open(audio_path, "rb") as af:
@@ -99,8 +127,8 @@ class GroqProvider:
                         "response_format": "verbose_json",
                         "temperature": 0.0,
                     }
-                    if language and language.lower() not in ["auto", ""]:
-                        kwargs["language"] = language.lower()
+                    if effective_language:
+                        kwargs["language"] = effective_language.lower()
                     if prompt_str:
                         kwargs["prompt"] = prompt_str
 
@@ -178,7 +206,7 @@ class GroqProvider:
             messages.append({"role": "system", "content": system_instruction})
         messages.append({"role": "user", "content": prompt})
 
-        models = [model, "llama-3.1-8b-instant"]
+        models = [model, "qwen/qwen3.8-27b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
         for m in models:
             try:
                 kwargs: Dict[str, Any] = {

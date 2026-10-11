@@ -24,7 +24,8 @@ class Settings(BaseSettings):
 
     # Groq & Cloud Speech-to-Text Configurations
     GROQ_TRANSCRIPTION_MODEL: str = "whisper-large-v3-turbo"
-    TRANSCRIPTION_LANGUAGE: str = "en"
+    TRANSCRIPTION_LANGUAGE: str = "auto"
+    ENABLE_TRANSCRIPT_CLEANUP: bool = True
     MEETING_VOCABULARY_CONTEXT: str = (
         "Technical engineering meeting discussing authentication, authorization, login, Gmail, "
         "password, APIs, AI/ML, deployment, frontend, backend, database, PostgreSQL, SQLite, "

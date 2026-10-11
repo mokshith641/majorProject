@@ -96,10 +96,12 @@ class AssemblyAIDiarizationProvider(SpeakerDiarizationProvider):
             f"(expected_speakers={expected_speakers}, min={min_speakers}, max={max_speakers})..."
         )
 
+        configured_lang = getattr(settings, "TRANSCRIPTION_LANGUAGE", "en")
         config_kwargs: Dict[str, Any] = {
             "speaker_labels": True,
-            "language_code": "en",
         }
+        if configured_lang and configured_lang.lower() not in ["auto", "", "none"]:
+            config_kwargs["language_code"] = configured_lang.lower()
         if expected_speakers and expected_speakers >= 2:
             config_kwargs["speakers_expected"] = expected_speakers
 

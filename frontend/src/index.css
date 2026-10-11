@@ -1,145 +1,277 @@
 @import "tailwindcss";
 
-@import url('https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
-/* Google Meet Theme Variables */
+/* ==========================================================================
+   Meet Assistant — Enterprise SaaS Design System Tokens
+   ========================================================================== */
+
 :root {
-  --bg-app: #f8fafd;
-  --bg-surface: #ffffff;
-  --bg-surface-hover: #f1f3f4;
-  --bg-card: #ffffff;
-  --bg-card-secondary: #f8fafd;
-  --bg-input: #ffffff;
-  --border-subtle: #e8eaed;
-  --border-strong: #dadce0;
-  --text-primary: #202124;
-  --text-secondary: #5f6368;
-  --text-muted: #80868b;
-  --color-brand: #1a73e8;
-  --color-brand-hover: #1967d2;
-  --color-brand-light: #e8f0fe;
-  --color-brand-text: #174ea6;
-  --shadow-card: 0 1px 3px 0 rgba(60, 64, 67, 0.08), 0 2px 6px 2px rgba(60, 64, 67, 0.04);
-  --shadow-dropdown: 0 4px 12px 0 rgba(60, 64, 67, 0.15);
-  --scrollbar-track: #f1f3f4;
-  --scrollbar-thumb: #dadce0;
-  --scrollbar-thumb-hover: #1a73e8;
+  /* Surface & Background Hierarchy */
+  --bg-app: #F5F6F8;
+  --bg-sidebar: #FFFFFF;
+  --bg-header: #FFFFFF;
+  --bg-surface: #FFFFFF;
+  --bg-surface-hover: #F0F2F5;
+  --bg-card: #FFFFFF;
+  --bg-card-secondary: #F8F9FA;
+  --bg-elevated: #F0F2F5;
+  --bg-input: #FFFFFF;
+
+  /* Borders */
+  --border-subtle: #E1E5EA;
+  --border-strong: #CBD2D9;
+
+  /* Typography Colors */
+  --text-primary: #20252B;
+  --text-secondary: #59616B;
+  --text-muted: #747D88;
+
+  /* Brand & Actions */
+  --color-brand: #2563EB;
+  --color-brand-hover: #1D4ED8;
+  --color-brand-light: rgba(37, 99, 235, 0.08);
+  --color-brand-text: #1D4ED8;
+
+  /* Semantic Feedback Tokens */
+  --color-success: #12805C;
+  --color-success-bg: rgba(18, 128, 92, 0.08);
+  --color-warning: #A66B12;
+  --color-warning-bg: rgba(166, 107, 18, 0.08);
+  --color-error: #C63F45;
+  --color-error-bg: rgba(198, 63, 69, 0.08);
+
+  /* Elevation Shadows */
+  --shadow-card: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.04);
+  --shadow-elevated: 0 4px 6px -1px rgba(0, 0, 0, 0.06), 0 2px 4px -2px rgba(0, 0, 0, 0.04);
+  --shadow-dropdown: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.04);
+
+  /* Scrollbar */
+  --scrollbar-track: #F5F6F8;
+  --scrollbar-thumb: #D1D5DB;
+  --scrollbar-thumb-hover: #9CA3AF;
 }
 
 .dark, [data-theme="dark"] {
-  --bg-app: #0f141c;
-  --bg-surface: #182030;
-  --bg-surface-hover: #222d42;
-  --bg-card: #182030;
-  --bg-card-secondary: #121824;
-  --bg-input: #121824;
-  --border-subtle: #222f47;
-  --border-strong: #2e3e5c;
-  --text-primary: #f8fafc;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --color-brand: #3b82f6;
-  --color-brand-hover: #2563eb;
-  --color-brand-light: rgba(59, 130, 246, 0.15);
-  --color-brand-text: #60a5fa;
-  --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.3);
-  --shadow-dropdown: 0 8px 24px rgba(0, 0, 0, 0.4);
-  --scrollbar-track: #0f141c;
-  --scrollbar-thumb: #27354a;
-  --scrollbar-thumb-hover: #3b82f6;
+  /* Neutral Graphite / Charcoal Palette */
+  --bg-app: #17191C;
+  --bg-sidebar: #1D2024;
+  --bg-header: #1D2024;
+  --bg-surface: #1D2024;
+  --bg-surface-hover: #23272C;
+  --bg-card: #23272C;
+  --bg-card-secondary: #1D2024;
+  --bg-elevated: #292E34;
+  --bg-input: #1D2024;
+
+  /* Borders */
+  --border-subtle: #383E45;
+  --border-strong: #4B525B;
+
+  /* Typography Colors */
+  --text-primary: #F3F4F6;
+  --text-secondary: #B0B7C0;
+  --text-muted: #929AA5;
+
+  /* Brand & Actions */
+  --color-brand: #3478F6;
+  --color-brand-hover: #2563EB;
+  --color-brand-light: rgba(52, 120, 246, 0.12);
+  --color-brand-text: #60A5FA;
+
+  /* Semantic Feedback Tokens */
+  --color-success: #16A37A;
+  --color-success-bg: rgba(22, 163, 122, 0.12);
+  --color-warning: #D99A32;
+  --color-warning-bg: rgba(217, 154, 50, 0.12);
+  --color-error: #DC5555;
+  --color-error-bg: rgba(220, 85, 85, 0.12);
+
+  /* Elevation Shadows */
+  --shadow-card: 0 1px 3px 0 rgba(0, 0, 0, 0.35);
+  --shadow-elevated: 0 4px 8px 0 rgba(0, 0, 0, 0.4);
+  --shadow-dropdown: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+
+  /* Scrollbar */
+  --scrollbar-track: #17191C;
+  --scrollbar-thumb: #383E45;
+  --scrollbar-thumb-hover: #4B525B;
 }
 
 body {
   background-color: var(--bg-app);
   color: var(--text-primary);
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   overflow-x: hidden;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
-/* Glass and Surface Components with dynamic theme adaptation */
+/* Base Card and Surface Utilities */
 .glass-panel {
   background-color: var(--bg-surface);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border-subtle);
-  transition: background-color 0.2s ease, border-color 0.2s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 .glass-card {
   background-color: var(--bg-card);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
   border: 1px solid var(--border-subtle);
   box-shadow: var(--shadow-card);
-  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-/* Explicit theme utilities */
-.app-bg {
-  background-color: var(--bg-app);
-}
-
-.app-surface {
-  background-color: var(--bg-surface);
-}
-
-.app-card {
+/* Explicit Enterprise UI Components */
+.card-enterprise {
   background-color: var(--bg-card);
   border: 1px solid var(--border-subtle);
+  border-radius: 12px;
   box-shadow: var(--shadow-card);
+  transition: all 0.15s ease;
 }
 
-.app-border {
-  border-color: var(--border-subtle);
+.card-enterprise:hover {
+  border-color: var(--border-strong);
 }
 
-.app-text {
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 500;
+  font-size: 14px;
+  line-height: 20px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  background-color: var(--color-brand);
+  color: #ffffff;
+  transition: all 0.15s ease;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.btn-primary:hover {
+  background-color: var(--color-brand-hover);
+}
+
+.btn-primary:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 500;
+  font-size: 14px;
+  line-height: 20px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  background-color: var(--bg-card);
   color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  transition: all 0.15s ease;
+  cursor: pointer;
 }
 
-.app-text-secondary {
-  color: var(--text-secondary);
+.btn-secondary:hover {
+  background-color: var(--bg-surface-hover);
+  border-color: var(--border-strong);
 }
 
-.app-text-muted {
-  color: var(--text-muted);
+.btn-secondary:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
 }
 
-.app-input {
+.input-enterprise {
+  width: 100%;
   background-color: var(--bg-input);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border-subtle);
   color: var(--text-primary);
+  font-size: 14px;
+  border-radius: 8px;
+  padding: 8px 12px;
   outline: none;
-  transition: all 0.2s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.app-input:focus {
+.input-enterprise:focus {
   border-color: var(--color-brand);
   box-shadow: 0 0 0 3px var(--color-brand-light);
 }
 
-.glow-btn {
-  position: relative;
-  overflow: hidden;
-  transition: all 0.3s ease;
+.input-enterprise::placeholder {
+  color: var(--text-muted);
 }
 
-.glow-btn::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: radial-gradient(circle, var(--color-brand-light) 0%, transparent 70%);
-  opacity: 0;
-  transition: opacity 0.3s ease;
-  pointer-events: none;
+/* Status Badges */
+.badge-success {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 500;
+  background-color: var(--color-success-bg);
+  color: var(--color-success);
+  border: 1px solid rgba(22, 163, 122, 0.25);
 }
 
-.glow-btn:hover::after {
-  opacity: 1;
+.badge-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 500;
+  background-color: var(--color-warning-bg);
+  color: var(--color-warning);
+  border: 1px solid rgba(217, 154, 50, 0.25);
+}
+
+.badge-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 500;
+  background-color: var(--color-error-bg);
+  color: var(--color-error);
+  border: 1px solid rgba(220, 85, 85, 0.25);
+}
+
+.badge-neutral {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 500;
+  background-color: var(--bg-elevated);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+}
+
+.badge-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 500;
+  background-color: var(--color-brand-light);
+  color: var(--color-brand-text);
+  border: 1px solid rgba(52, 120, 246, 0.25);
 }
 
 /* Custom visual scrollbar */
@@ -162,15 +294,15 @@ body {
 }
 
 /* Live pulse animation */
-@keyframes pulse-glow {
+@keyframes pulse-subtle {
   0%, 100% {
-    box-shadow: 0 0 5px rgba(239, 68, 68, 0.5), 0 0 10px rgba(239, 68, 68, 0.3);
+    opacity: 1;
   }
   50% {
-    box-shadow: 0 0 15px rgba(239, 68, 68, 0.8), 0 0 25px rgba(239, 68, 68, 0.5);
+    opacity: 0.4;
   }
 }
 
 .live-pulse {
-  animation: pulse-glow 2s infinite ease-in-out;
+  animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }

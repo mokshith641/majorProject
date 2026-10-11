@@ -45,7 +45,7 @@ export const MeetingHistory: React.FC = () => {
   if (isLoading) {
     return (
       <div className="flex h-[60vh] items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#1a73e8] border-t-transparent"></div>
+        <div className="h-8 w-8 animate-spin rounded-full border-3 border-[var(--color-brand)] border-t-transparent"></div>
       </div>
     );
   }
@@ -54,12 +54,12 @@ export const MeetingHistory: React.FC = () => {
     <div className="space-y-6 max-w-7xl mx-auto">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-[var(--text-primary)]">Meeting Archive</h2>
-          <p className="text-[var(--text-secondary)] text-sm">Browse, search, and inspect past discussions and summaries.</p>
+          <h2 className="text-[26px] sm:text-[28px] font-semibold text-[var(--text-primary)] tracking-tight">Meeting Archive</h2>
+          <p className="text-[15px] text-[var(--text-secondary)] mt-1">Browse, search, and inspect past discussions and AI reports.</p>
         </div>
         <Link
           to={PATHS.CREATE_MEETING}
-          className="flex items-center gap-2 bg-[#1a73e8] hover:bg-[#1967d2] text-white font-medium px-4 py-2.5 rounded-xl shadow-xs hover:shadow-md transition-all text-sm self-start cursor-pointer"
+          className="btn-primary text-[14px] py-2 px-4 gap-2 rounded-lg self-start"
         >
           <Video className="h-4 w-4" />
           New Meeting
@@ -74,13 +74,13 @@ export const MeetingHistory: React.FC = () => {
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search meetings by title..."
-          className="w-full bg-[var(--bg-card)] border border-[var(--border-strong)] focus:border-[#1a73e8] text-[var(--text-primary)] rounded-xl pl-10 pr-4 py-2.5 text-sm transition-all outline-none"
+          className="input-enterprise pl-10 pr-4 py-2 text-[14px]"
         />
       </div>
 
       {/* Grid List */}
       {filteredMeetings.length === 0 ? (
-        <div className="glass-card text-center py-16 text-[var(--text-secondary)] text-sm rounded-2xl">
+        <div className="card-enterprise text-center py-16 text-[var(--text-secondary)] text-[15px]">
           No matching meetings found.
         </div>
       ) : (
@@ -88,43 +88,41 @@ export const MeetingHistory: React.FC = () => {
           {filteredMeetings.map((meeting) => (
             <div
               key={meeting.id}
-              className="glass-card p-6 rounded-2xl flex flex-col justify-between hover:border-[var(--border-strong)] transition-all hover:shadow-md"
+              className="card-enterprise p-6 flex flex-col justify-between"
             >
-              <div className="space-y-3">
+              <div className="space-y-3.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-[var(--text-muted)] font-semibold font-mono">ID: #{meeting.id}</span>
-                  <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase ${
-                    meeting.status === 'completed'
-                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800'
-                      : meeting.status === 'ongoing'
-                      ? 'bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-400 dark:border-rose-800'
-                      : 'bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/40 dark:text-blue-400 dark:border-blue-800'
-                  }`}>
-                    {meeting.status}
-                  </span>
+                  <span className="text-[12px] text-[var(--text-muted)] font-mono font-medium">#{meeting.id}</span>
+                  {meeting.status === 'completed' ? (
+                    <span className="badge-success capitalize">{meeting.status}</span>
+                  ) : meeting.status === 'ongoing' ? (
+                    <span className="badge-warning capitalize live-pulse">{meeting.status}</span>
+                  ) : (
+                    <span className="badge-neutral capitalize">{meeting.status}</span>
+                  )}
                 </div>
 
-                <h3 className="text-base font-bold text-[var(--text-primary)] line-clamp-1">{meeting.title}</h3>
+                <h3 className="text-[17px] sm:text-[18px] font-semibold text-[var(--text-primary)] line-clamp-1">{meeting.title}</h3>
                 
-                <div className="flex flex-col gap-2 text-xs text-[var(--text-secondary)] pt-1">
-                  <span className="flex items-center gap-1.5">
-                    <Calendar className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+                <div className="flex flex-col gap-2 text-[13px] sm:text-[14px] text-[var(--text-secondary)] pt-1">
+                  <span className="flex items-center gap-2">
+                    <Calendar className="h-4 w-4 text-[var(--text-muted)] shrink-0" />
                     {new Date(meeting.date).toLocaleDateString(undefined, {
                       month: 'short',
                       day: 'numeric',
                       year: 'numeric'
                     })}
                   </span>
-                  <span className="flex items-center gap-1.5">
-                    <Clock className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+                  <span className="flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-[var(--text-muted)] shrink-0" />
                     {formatDuration(meeting.duration_seconds)}
                   </span>
                   {meeting.focus_score !== undefined && (
-                    <span className="flex items-center gap-1.5 font-medium">
-                      <Activity className="h-3.5 w-3.5 text-[#1a73e8] dark:text-blue-400" />
+                    <span className="flex items-center gap-2 font-medium">
+                      <Activity className="h-4 w-4 text-[var(--text-muted)] shrink-0" />
                       Focus Level:{' '}
-                      <strong className={meeting.focus_score >= 80 ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}>
-                        {meeting.focus_score}%
+                      <strong className={meeting.focus_score >= 80 ? 'text-[var(--color-success)]' : 'text-[var(--color-warning)]'}>
+                        {meeting.focus_score.toFixed(1)}%
                       </strong>
                     </span>
                   )}
@@ -134,7 +132,7 @@ export const MeetingHistory: React.FC = () => {
               <div className="mt-6 pt-4 border-t border-[var(--border-subtle)] flex justify-end">
                 <Link
                   to={meeting.status === 'ongoing' ? `/meetings/${meeting.id}/live` : `/meetings/${meeting.id}`}
-                  className="text-xs text-[#1a73e8] hover:text-[#1967d2] font-semibold inline-flex items-center gap-1 transition-colors"
+                  className="text-[13px] font-medium text-[var(--color-brand)] hover:text-[var(--color-brand-hover)] inline-flex items-center gap-1.5 transition-colors"
                 >
                   View Details
                   <ArrowRight className="h-3.5 w-3.5" />

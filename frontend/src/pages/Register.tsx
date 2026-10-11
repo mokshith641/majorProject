@@ -40,7 +40,7 @@ export const Register: React.FC = () => {
       setSuccess(true);
       setTimeout(() => {
         navigate(PATHS.LOGIN, { state: { from } });
-      }, 2500);
+      }, 2000);
     } catch (e: any) {
       console.error(e);
       setErrorMsg(
@@ -52,23 +52,21 @@ export const Register: React.FC = () => {
   };
 
   return (
-    <div className="w-full max-w-md glass-card rounded-2xl p-8 shadow-xl relative overflow-hidden">
-      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#1a73e8] via-[#34a853] to-[#fbbc05]"></div>
-
-      <div className="mb-8 text-center">
-        <h2 className="text-2xl font-bold text-[var(--text-primary)] mb-2">Create Account</h2>
-        <p className="text-[var(--text-secondary)] text-sm">Register to start managing meeting telemetry</p>
+    <div className="w-full max-w-md card-enterprise p-8 space-y-6 shadow-md">
+      <div className="text-center">
+        <h2 className="text-[24px] font-semibold text-[var(--text-primary)] tracking-tight">Create Account</h2>
+        <p className="text-[14px] text-[var(--text-secondary)] mt-1">Register to start managing meeting telemetry</p>
       </div>
 
       {success && (
-        <div className="flex items-center gap-2 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30 p-4 rounded-xl text-sm mb-6">
-          <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+        <div className="badge-success w-full p-3.5 rounded-lg text-[13px] flex items-center gap-2">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
           <span>Registration successful! Redirecting to login...</span>
         </div>
       )}
 
       {errorMsg && (
-        <div className="flex items-center gap-2 bg-rose-50 text-rose-700 dark:bg-rose-950/20 dark:text-rose-300 border border-rose-200 dark:border-rose-900/50 p-3.5 rounded-xl text-sm mb-6">
+        <div className="badge-error w-full p-3 rounded-lg text-[13px] flex items-center gap-2">
           <AlertCircle className="h-4 w-4 shrink-0" />
           <span>{errorMsg}</span>
         </div>
@@ -76,7 +74,7 @@ export const Register: React.FC = () => {
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         <div>
-          <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-1.5">
+          <label className="block text-[13px] font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-1.5">
             Full Name
           </label>
           <div className="relative">
@@ -84,15 +82,15 @@ export const Register: React.FC = () => {
             <input
               type="text"
               {...register('name', { required: 'Full name is required' })}
-              placeholder="Moksh"
-              className="w-full bg-[var(--bg-input)] border border-[var(--border-strong)] focus:border-[#1a73e8] text-[var(--text-primary)] rounded-xl pl-10 pr-4 py-2.5 text-sm transition-all outline-none"
+              placeholder="Your Name"
+              className="input-enterprise pl-10 pr-4 py-2.5 text-[14px]"
             />
           </div>
-          {errors.name && <p className="text-rose-600 dark:text-rose-400 text-xs mt-1">{errors.name.message}</p>}
+          {errors.name && <p className="text-[var(--color-error)] text-[12px] mt-1">{errors.name.message}</p>}
         </div>
 
         <div>
-          <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-1.5">
+          <label className="block text-[13px] font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-1.5">
             Email Address
           </label>
           <div className="relative">
@@ -106,15 +104,15 @@ export const Register: React.FC = () => {
                   message: 'Invalid email address',
                 },
               })}
-              placeholder="moksh@example.com"
-              className="w-full bg-[var(--bg-input)] border border-[var(--border-strong)] focus:border-[#1a73e8] text-[var(--text-primary)] rounded-xl pl-10 pr-4 py-2.5 text-sm transition-all outline-none"
+              placeholder="you@example.com"
+              className="input-enterprise pl-10 pr-4 py-2.5 text-[14px]"
             />
           </div>
-          {errors.email && <p className="text-rose-600 dark:text-rose-400 text-xs mt-1">{errors.email.message}</p>}
+          {errors.email && <p className="text-[var(--color-error)] text-[12px] mt-1">{errors.email.message}</p>}
         </div>
 
         <div>
-          <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-1.5">
+          <label className="block text-[13px] font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-1.5">
             Password (Min 6 chars)
           </label>
           <div className="relative">
@@ -126,19 +124,19 @@ export const Register: React.FC = () => {
                 minLength: { value: 6, message: 'Password must be at least 6 characters' },
               })}
               placeholder="••••••••"
-              className="w-full bg-[var(--bg-input)] border border-[var(--border-strong)] focus:border-[#1a73e8] text-[var(--text-primary)] rounded-xl pl-10 pr-4 py-2.5 text-sm transition-all outline-none"
+              className="input-enterprise pl-10 pr-4 py-2.5 text-[14px]"
             />
           </div>
-          {errors.password && <p className="text-rose-600 dark:text-rose-400 text-xs mt-1">{errors.password.message}</p>}
+          {errors.password && <p className="text-[var(--color-error)] text-[12px] mt-1">{errors.password.message}</p>}
         </div>
 
         <div>
-          <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-1.5">
+          <label className="block text-[13px] font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-1.5">
             Platform Role
           </label>
           <select
             {...register('role')}
-            className="w-full bg-[var(--bg-input)] border border-[var(--border-strong)] focus:border-[#1a73e8] text-[var(--text-primary)] rounded-xl px-3.5 py-2.5 text-sm transition-all outline-none cursor-pointer"
+            className="input-enterprise py-2.5 text-[14px] cursor-pointer"
           >
             <option value="user">Standard User</option>
             <option value="admin">Administrator</option>
@@ -148,7 +146,7 @@ export const Register: React.FC = () => {
         <button
           type="submit"
           disabled={isSubmitting || success}
-          className="w-full py-3 bg-[#1a73e8] hover:bg-[#1967d2] disabled:opacity-50 text-white font-medium rounded-xl shadow-xs hover:shadow-md transition-all text-sm flex items-center justify-center gap-2 mt-6 cursor-pointer"
+          className="btn-primary w-full py-2.5 text-[14px] disabled:opacity-50 mt-6 cursor-pointer gap-2"
         >
           {isSubmitting ? (
             <>
@@ -161,9 +159,9 @@ export const Register: React.FC = () => {
         </button>
       </form>
 
-      <div className="mt-8 text-center text-sm text-[var(--text-secondary)]">
+      <div className="text-center text-[14px] text-[var(--text-secondary)] pt-2 border-t border-[var(--border-subtle)]">
         Already have an account?{' '}
-        <Link to={PATHS.LOGIN} state={{ from }} className="text-[#1a73e8] hover:text-[#1967d2] font-semibold transition-colors">
+        <Link to={PATHS.LOGIN} state={{ from }} className="text-[var(--color-brand)] hover:text-[var(--color-brand-hover)] font-semibold transition-colors">
           Sign In
         </Link>
       </div>

@@ -41,7 +41,10 @@ class MeetingUpdate(BaseModel):
 class TranscriptResponseSchema(BaseModel):
     id: int
     full_text: str
-    raw_segments: List[Dict[str, Any]]
+    raw_transcript: Optional[str] = None
+    cleaned_transcript: Optional[str] = None
+    raw_segments: List[Dict[str, Any]] = []
+    diagnostics: Optional[Dict[str, Any]] = None
     generated_at: datetime
 
     class Config:

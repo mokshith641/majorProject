@@ -20,19 +20,22 @@ from app.ai.services.audio_preprocessor import AudioPreprocessor
 from app.ai.services.transcription_service import TranscriptionService
 from app.ai.services.diarization_service import DiarizationService
 from app.ai.services.transcript_alignment_service import TranscriptAlignmentService
+from app.ai.services.transcript_cleanup_service import TranscriptCleanupService, transcript_cleanup_service
 from app.ai.services.summary_service import SummaryService
 
 logger = logging.getLogger(__name__)
 
-# Global in-memory processing status registry:
-# meeting_id -> {
-#   "status": str,
-#   "progress": int,
-#   "step": str,
-#   "error": Optional[str],
-#   "telemetry": Dict[str, Any],
-#   "done": bool
-# }
+PIPELINE_STAGES = [
+    {"key": "UPLOADING", "label": "Uploading audio"},
+    {"key": "TRANSCRIBING", "label": "Transcribing audio"},
+    {"key": "DIARIZING", "label": "Detecting speakers"},
+    {"key": "ALIGNING", "label": "Aligning transcript"},
+    {"key": "CLEANING", "label": "Cleaning transcript"},
+    {"key": "ANALYZING", "label": "Generating summary"},
+    {"key": "COMPLETED", "label": "Completed"},
+]
+
+# Global in-memory processing status registry
 pipeline_status_registry: Dict[int, Dict[str, Any]] = {}
 
 
@@ -48,11 +51,13 @@ class MeetingProcessingPipeline:
         transcription_service: Optional[TranscriptionService] = None,
         diarization_service: Optional[DiarizationService] = None,
         alignment_service: Optional[TranscriptAlignmentService] = None,
+        cleanup_service: Optional[TranscriptCleanupService] = None,
         summary_service: Optional[SummaryService] = None,
     ):
         self.transcription_service = transcription_service or TranscriptionService()
         self.diarization_service = diarization_service or DiarizationService()
         self.alignment_service = alignment_service or TranscriptAlignmentService()
+        self.cleanup_service = cleanup_service or transcript_cleanup_service
         self.summary_service = summary_service or SummaryService()
 
     @staticmethod
@@ -65,6 +70,8 @@ class MeetingProcessingPipeline:
                 "status": "COMPLETED",
                 "progress": 100,
                 "step": "Processing complete.",
+                "stages": PIPELINE_STAGES,
+                "current_stage": "COMPLETED",
                 "error": None,
                 "done": True,
                 "telemetry": {},
@@ -91,6 +98,8 @@ class MeetingProcessingPipeline:
             "status": status,
             "progress": progress,
             "step": step,
+            "stages": PIPELINE_STAGES,
+            "current_stage": status,
             "error": error,
             "telemetry": merged_telemetry,
             "done": done,
@@ -116,11 +125,11 @@ class MeetingProcessingPipeline:
         t_start_total = time.time()
         telemetry: Dict[str, Any] = {
             "mode": mode,
-            "language": language or "auto",
+            "language": language or getattr(settings, "TRANSCRIPTION_LANGUAGE", "auto"),
             "pipeline_start": t_start_total,
         }
 
-        self._update_status(meeting_id, "QUEUED", 10, "Job queued for processing...", telemetry=telemetry)
+        self._update_status(meeting_id, "QUEUED", 5, "Job queued for processing...", telemetry=telemetry)
 
         db: Session = SessionLocal()
         try:
@@ -139,20 +148,28 @@ class MeetingProcessingPipeline:
                     if p.name and p.name not in participant_names:
                         participant_names.append(p.name)
 
-            # ── Stage 1: Audio Validation & Preprocessing ─────────────────
-            self._update_status(meeting_id, "UPLOADING", 25, "Validating and preparing audio stream...")
+            # ── Stage 1: Audio Validation & Preprocessing (15%) ───────────
+            self._update_status(meeting_id, "UPLOADING", 15, "Validating audio format and inspecting diagnostics...")
             t_prep_start = time.time()
             prepared_audio_path = AudioPreprocessor.prepare_audio_for_transcription(audio_path)
             sample_rate, channels, audio_duration = AudioPreprocessor.inspect_audio(prepared_audio_path)
+            quality_diag = AudioPreprocessor.analyze_audio_quality(prepared_audio_path)
+            
             telemetry["audio_duration_seconds"] = audio_duration
             telemetry["audio_prep_duration"] = round(time.time() - t_prep_start, 2)
+            telemetry["audio_quality"] = quality_diag.get("audio_quality", "Normal")
+            telemetry["silence_percent"] = quality_diag.get("silence_percent", 0.0)
+            telemetry["rms"] = quality_diag.get("rms", 0.0)
+            telemetry["clipping_percent"] = quality_diag.get("clipping_percent", 0.0)
+            telemetry["sample_rate"] = sample_rate
+            telemetry["channels"] = channels
 
             if audio_duration > 0 and meeting.duration_seconds <= 0:
                 meeting.duration_seconds = int(audio_duration)
                 db.commit()
 
-            # ── Stage 2: Speech-to-Text Transcription ─────────────────────
-            self._update_status(meeting_id, "TRANSCRIBING", 50, f"Transcribing audio with Groq {mode.capitalize()} engine...")
+            # ── Stage 2: Speech-to-Text Transcription (35%) ───────────────
+            self._update_status(meeting_id, "TRANSCRIBING", 35, f"Transcribing speech with Groq Whisper...")
             logger.info("[TRANSCRIPTION] Groq started")
             t_stt_start = time.time()
             full_text, raw_segments, stt_provider = self.transcription_service.transcribe(
@@ -167,6 +184,7 @@ class MeetingProcessingPipeline:
             telemetry["transcription_end"] = t_stt_end
             telemetry["transcription_duration"] = round(t_stt_end - t_stt_start, 2)
             telemetry["transcription_provider"] = stt_provider
+            telemetry["transcription_model"] = getattr(settings, "GROQ_TRANSCRIPTION_MODEL", "whisper-large-v3-turbo")
 
             # Fall back to live captions buffer if STT returned no segments
             if (not raw_segments or len(raw_segments) == 0) and live_caps:
@@ -183,8 +201,8 @@ class MeetingProcessingPipeline:
                     for i, c in enumerate(live_caps) if c.get("text")
                 ]
 
-            # ── Stage 3: Speaker Diarization ──────────────────────────────
-            self._update_status(meeting_id, "DIARIZING", 65, "Identifying speakers via AssemblyAI...")
+            # ── Stage 3: Speaker Diarization (55%) ────────────────────────
+            self._update_status(meeting_id, "DIARIZING", 55, "Detecting distinct speakers via AssemblyAI...")
             logger.info("[DIARIZATION] AssemblyAI started")
             t_diarize_start = time.time()
             expected_speakers = len(participant_names) if participant_names and len(participant_names) >= 2 else None
@@ -201,11 +219,12 @@ class MeetingProcessingPipeline:
             telemetry["diarization_end"] = t_diarize_end
             telemetry["diarization_duration"] = round(t_diarize_end - t_diarize_start, 2)
             telemetry["diarization_provider"] = diarize_provider
+            telemetry["diarization_segments_count"] = len(speaker_intervals)
 
-            # ── Stage 4: Transcript Alignment ─────────────────────────────
-            self._update_status(meeting_id, "ALIGNING", 75, "Aligning transcript segments with speakers...")
+            # ── Stage 4: Transcript Alignment (70%) ───────────────────────
+            self._update_status(meeting_id, "ALIGNING", 70, "Aligning transcript segments with speakers...")
             logger.info(f"[ALIGNMENT] Transcript segments: {len(raw_segments)}")
-            logger.info(f"[ALIGNMENT] Diarization segments: {len(speaker_intervals)}")
+            logger.info(f"[ALIGNMENT] Diarization intervals: {len(speaker_intervals)}")
             t_align_start = time.time()
             aligned_segments = self.alignment_service.align(
                 transcript_segments=raw_segments,
@@ -213,11 +232,7 @@ class MeetingProcessingPipeline:
                 participant_names=participant_names,
             )
             telemetry["alignment_duration"] = round(time.time() - t_align_start, 2)
-
-            # Format canonical speaker transcript (e.g. Participant 1: ..., Participant 2: ...)
-            formatted_text = self.alignment_service.format_full_transcript(aligned_segments)
-            if formatted_text:
-                full_text = formatted_text
+            raw_transcript_text = TranscriptCleanupService.format_transcript_text(aligned_segments, use_cleaned=False)
 
             # Auto-register newly detected speakers as meeting participants
             detected_speakers = set(seg.get("speaker_name") for seg in aligned_segments if seg.get("speaker_name"))
@@ -229,26 +244,63 @@ class MeetingProcessingPipeline:
                     new_p = Participant(meeting_id=meeting.id, name=spk)
                     db.add(new_p)
 
-            # Save Transcript in Database
+            # ── Stage 5: Light Transcript Cleanup (80%) ───────────────────
+            self._update_status(meeting_id, "CLEANING", 80, "Applying light punctuation formatting and term normalization...")
+            t_clean_start = time.time()
+            cleaned_segments = self.cleanup_service.clean_segments(aligned_segments)
+            cleaned_transcript_text = TranscriptCleanupService.format_transcript_text(cleaned_segments, use_cleaned=True)
+            telemetry["cleaning_duration"] = round(time.time() - t_clean_start, 2)
+
+            suspicious_segments = sum(1 for seg in cleaned_segments if seg.get("quality_flags"))
+            telemetry["suspicious_segments_count"] = suspicious_segments
+
+            # Persist diagnostics dictionary
+            diagnostics_payload = {
+                "audio_duration_seconds": audio_duration,
+                "audio_quality": telemetry.get("audio_quality", "Normal"),
+                "silence_percent": telemetry.get("silence_percent", 0.0),
+                "rms": telemetry.get("rms", 0.0),
+                "clipping_percent": telemetry.get("clipping_percent", 0.0),
+                "sample_rate": sample_rate,
+                "channels": channels,
+                "transcription_provider": stt_provider,
+                "transcription_model": telemetry.get("transcription_model", "whisper-large-v3-turbo"),
+                "diarization_provider": diarize_provider,
+                "detected_speakers_count": len(detected_speakers),
+                "detected_speakers": sorted(list(detected_speakers)),
+                "transcript_segments_count": len(cleaned_segments),
+                "diarization_segments_count": len(speaker_intervals),
+                "suspicious_segments_count": suspicious_segments,
+                "processing_mode": mode,
+            }
+            telemetry["diagnostics"] = diagnostics_payload
+
+            # Save raw and cleaned transcript in Database
             existing_transcript = db.query(Transcript).filter(Transcript.meeting_id == meeting.id).first()
             if existing_transcript:
-                existing_transcript.full_text = full_text or "No speech recorded."
-                existing_transcript.raw_segments = aligned_segments
+                existing_transcript.full_text = cleaned_transcript_text or raw_transcript_text or "No speech recorded."
+                existing_transcript.raw_transcript = raw_transcript_text
+                existing_transcript.cleaned_transcript = cleaned_transcript_text
+                existing_transcript.raw_segments = cleaned_segments
+                existing_transcript.diagnostics = diagnostics_payload
             else:
                 db_transcript = Transcript(
                     meeting_id=meeting.id,
-                    full_text=full_text or "No speech recorded.",
-                    raw_segments=aligned_segments,
+                    full_text=cleaned_transcript_text or raw_transcript_text or "No speech recorded.",
+                    raw_transcript=raw_transcript_text,
+                    cleaned_transcript=cleaned_transcript_text,
+                    raw_segments=cleaned_segments,
+                    diagnostics=diagnostics_payload,
                 )
                 db.add(db_transcript)
             db.commit()
 
-            # ── Stage 5: AI Summarization & Intelligence ──────────────────
-            self._update_status(meeting_id, "ANALYZING", 85, "Synthesizing executive summary and action items...")
-            logger.info("[SUMMARY] Gemini started")
+            # ── Stage 6: AI Summarization & Intelligence (90%) ────────────
+            self._update_status(meeting_id, "ANALYZING", 90, "Synthesizing executive summary and action items...")
+            logger.info("[SUMMARY] Generating intelligence from cleaned transcript")
             t_sum_start = time.time()
             intelligence, summary_provider = self.summary_service.generate_intelligence(
-                transcript=full_text,
+                transcript=cleaned_transcript_text or raw_transcript_text,
                 participant_names=participant_names,
             )
             t_sum_end = time.time()

@@ -24,7 +24,7 @@ from app.reports.pdf_generator import generate_meeting_pdf
 from app.monitoring.input_monitor import activity_tracker
 from app.monitoring.vision_monitor import vision_monitor
 from app.websocket.connection_manager import manager
-from app.ai.services.meeting_pipeline import meeting_pipeline, pipeline_status_registry
+from app.ai.services.meeting_pipeline import meeting_pipeline, pipeline_status_registry, PIPELINE_STAGES
 from app.ai.services.audio_preprocessor import AudioPreprocessor
 
 logger = logging.getLogger(__name__)
@@ -518,6 +518,8 @@ def get_processing_status(
                 "status": "COMPLETED",
                 "progress": 100,
                 "step": "Meeting intelligence processing complete!",
+                "stages": PIPELINE_STAGES,
+                "current_stage": "COMPLETED",
                 "done": True,
                 "error": None,
                 "telemetry": {},
@@ -528,10 +530,16 @@ def get_processing_status(
                 "status": "FAILED",
                 "progress": 0,
                 "step": "Processing failed.",
+                "stages": PIPELINE_STAGES,
+                "current_stage": "FAILED",
                 "done": True,
                 "error": "Meeting processing failed.",
                 "telemetry": {},
             }
+
+    if status and "stages" not in status:
+        status["stages"] = PIPELINE_STAGES
+        status["current_stage"] = status.get("status", "QUEUED")
 
     return status
 
@@ -605,6 +613,7 @@ def debug_meeting_diarization(
             "assemblyai_key_configured": bool(getattr(settings, "ASSEMBLYAI_API_KEY", None)),
             "groq_available": groq.is_available(),
             "groq_key_configured": bool(getattr(settings, "GROQ_API_KEY", None)),
+            "groq_model": getattr(settings, "GROQ_TRANSCRIPTION_MODEL", "whisper-large-v3-turbo"),
         },
         "diarization": {
             "total_segments": len(segments),
@@ -612,6 +621,9 @@ def debug_meeting_diarization(
             "speaker_count": len(unique_speakers),
             "sample_segments": segments[:10],
         },
+        "diagnostics": transcript.diagnostics if transcript and transcript.diagnostics else {},
+        "raw_transcript": transcript.raw_transcript if transcript else None,
+        "cleaned_transcript": transcript.cleaned_transcript if transcript else None,
         "full_transcript_preview": transcript.full_text[:500] if transcript and transcript.full_text else None,
         "pipeline_status": pipeline_status,
     }

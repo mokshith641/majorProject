@@ -81,7 +81,7 @@ export const AdminDashboard: React.FC = () => {
   if (isLoading) {
     return (
       <div className="flex h-[60vh] items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#1a73e8] border-t-transparent"></div>
+        <div className="h-8 w-8 animate-spin rounded-full border-3 border-[var(--color-brand)] border-t-transparent"></div>
       </div>
     );
   }
@@ -89,74 +89,74 @@ export const AdminDashboard: React.FC = () => {
   return (
     <div className="space-y-8 max-w-7xl mx-auto">
       <div>
-        <h2 className="text-2xl font-bold text-[var(--text-primary)] flex items-center gap-2">
-          <ShieldCheck className="h-6 w-6 text-rose-500" />
+        <h2 className="text-[26px] sm:text-[28px] font-semibold text-[var(--text-primary)] tracking-tight flex items-center gap-2.5">
+          <ShieldCheck className="h-6 w-6 text-[var(--color-error)]" />
           Admin Portal Dashboard
         </h2>
-        <p className="text-[var(--text-secondary)] text-sm">Audit accounts registration and inspect server computer metrics.</p>
+        <p className="text-[15px] text-[var(--text-secondary)] mt-1">Audit platform user accounts and inspect server infrastructure telemetry.</p>
       </div>
 
       {/* 1. System Health indicators */}
       {health && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           {/* CPU Card */}
-          <div className="glass-card p-6 rounded-2xl space-y-4">
+          <div className="card-enterprise p-6 space-y-4">
             <div className="flex items-center justify-between">
-              <span className="text-xs text-[var(--text-secondary)] font-semibold uppercase tracking-wider">CPU Usage</span>
-              <Cpu className="h-5 w-5 text-[#1a73e8] dark:text-blue-400" />
+              <span className="text-[13px] text-[var(--text-secondary)] font-medium">CPU Usage</span>
+              <Cpu className="h-5 w-5 text-[var(--color-brand)]" />
             </div>
             <div>
-              <h3 className="text-2xl font-bold text-[var(--text-primary)]">{health.cpu.usage_percent}%</h3>
-              <p className="text-[var(--text-secondary)] text-xs mt-1">Logical cores: {health.cpu.cores}</p>
+              <h3 className="text-[26px] sm:text-[28px] font-semibold text-[var(--text-primary)] tracking-tight">{health.cpu.usage_percent}%</h3>
+              <p className="text-[13px] text-[var(--text-muted)] mt-1">Logical cores: {health.cpu.cores}</p>
             </div>
-            <div className="w-full bg-[var(--bg-surface-hover)] rounded-full h-1.5 overflow-hidden">
-              <div className="bg-[#1a73e8] h-1.5 transition-all duration-500 rounded-full" style={{ width: `${health.cpu.usage_percent}%` }}></div>
+            <div className="w-full bg-[var(--bg-elevated)] rounded-full h-1.5 overflow-hidden">
+              <div className="bg-[var(--color-brand)] h-1.5 transition-all duration-500 rounded-full" style={{ width: `${health.cpu.usage_percent}%` }}></div>
             </div>
           </div>
 
           {/* RAM Card */}
-          <div className="glass-card p-6 rounded-2xl space-y-4">
+          <div className="card-enterprise p-6 space-y-4">
             <div className="flex items-center justify-between">
-              <span className="text-xs text-[var(--text-secondary)] font-semibold uppercase tracking-wider">System Memory</span>
-              <HardDrive className="h-5 w-5 text-[#1a73e8] dark:text-blue-400" />
+              <span className="text-[13px] text-[var(--text-secondary)] font-medium">System Memory</span>
+              <HardDrive className="h-5 w-5 text-[var(--color-success)]" />
             </div>
             <div>
-              <h3 className="text-2xl font-bold text-[var(--text-primary)]">{health.memory.usage_percent}%</h3>
-              <p className="text-[var(--text-secondary)] text-xs mt-1">
+              <h3 className="text-[26px] sm:text-[28px] font-semibold text-[var(--text-primary)] tracking-tight">{health.memory.usage_percent}%</h3>
+              <p className="text-[13px] text-[var(--text-muted)] mt-1">
                 Available: {health.memory.available_gb} GB / {health.memory.total_gb} GB
               </p>
             </div>
-            <div className="w-full bg-[var(--bg-surface-hover)] rounded-full h-1.5 overflow-hidden">
-              <div className="bg-[#1a73e8] h-1.5 transition-all duration-500 rounded-full" style={{ width: `${health.memory.usage_percent}%` }}></div>
+            <div className="w-full bg-[var(--bg-elevated)] rounded-full h-1.5 overflow-hidden">
+              <div className="bg-[var(--color-success)] h-1.5 transition-all duration-500 rounded-full" style={{ width: `${health.memory.usage_percent}%` }}></div>
             </div>
           </div>
 
           {/* Process specs */}
-          <div className="glass-card p-6 rounded-2xl space-y-4">
+          <div className="card-enterprise p-6 space-y-4">
             <div className="flex items-center justify-between">
-              <span className="text-xs text-[var(--text-secondary)] font-semibold uppercase tracking-wider">Server Performance</span>
-              <Settings className="h-5 w-5 text-[#1a73e8] dark:text-blue-400" />
+              <span className="text-[13px] text-[var(--text-secondary)] font-medium">Server Performance</span>
+              <Settings className="h-5 w-5 text-[var(--text-secondary)]" />
             </div>
             <div>
-              <h3 className="text-2xl font-bold text-[var(--text-primary)]">{health.process.memory_usage_mb} MB</h3>
-              <p className="text-[var(--text-secondary)] text-xs mt-1">Active worker threads: {health.process.threads_active}</p>
+              <h3 className="text-[26px] sm:text-[28px] font-semibold text-[var(--text-primary)] tracking-tight">{health.process.memory_usage_mb} MB</h3>
+              <p className="text-[13px] text-[var(--text-muted)] mt-1">Active worker threads: {health.process.threads_active}</p>
             </div>
-            <div className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">Memory consumption healthy</div>
+            <div className="badge-success text-[12px]">Memory consumption healthy</div>
           </div>
         </div>
       )}
 
       {/* 2. User Directory control panel */}
-      <div className="glass-card p-6 rounded-2xl">
-        <h3 className="text-base font-bold text-[var(--text-primary)] mb-6 flex items-center gap-2">
-          <Users className="h-5 w-5 text-[#1a73e8] dark:text-blue-400" />
+      <div className="card-enterprise p-6 sm:p-7">
+        <h3 className="text-[19px] sm:text-[20px] font-semibold text-[var(--text-primary)] tracking-tight mb-6 flex items-center gap-2.5">
+          <Users className="h-5 w-5 text-[var(--color-brand)]" />
           Platform Accounts Directory
         </h3>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm border-collapse">
+        <div className="overflow-x-auto -mx-6 sm:mx-0">
+          <table className="w-full text-left text-[14px] sm:text-[15px] border-collapse min-w-[640px]">
             <thead>
-              <tr className="border-b border-[var(--border-subtle)] text-[var(--text-secondary)] text-xs uppercase font-semibold">
+              <tr className="border-b border-[var(--border-subtle)] text-[var(--text-muted)] text-[12px] sm:text-[13px] font-semibold uppercase tracking-wider">
                 <th className="py-3 px-4">Name</th>
                 <th className="py-3 px-4">Email</th>
                 <th className="py-3 px-4">Registered Date</th>
@@ -167,32 +167,30 @@ export const AdminDashboard: React.FC = () => {
             <tbody className="divide-y divide-[var(--border-subtle)]">
               {users.map((item) => (
                 <tr key={item.id} className="hover:bg-[var(--bg-surface-hover)] transition-colors">
-                  <td className="py-3 px-4 text-[var(--text-primary)] font-medium">{item.full_name || '-'}</td>
-                  <td className="py-3 px-4 text-[var(--text-secondary)]">{item.email}</td>
-                  <td className="py-3 px-4 text-[var(--text-secondary)]">{new Date(item.created_at).toLocaleDateString()}</td>
-                  <td className="py-3 px-4">
-                    <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold capitalize ${
-                      item.role === 'admin' 
-                        ? 'bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-400 dark:border-rose-800' 
-                        : 'bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/40 dark:text-blue-400 dark:border-blue-800'
-                    }`}>
-                      {item.role}
-                    </span>
+                  <td className="py-4 px-4 text-[var(--text-primary)] font-medium">{item.full_name || '-'}</td>
+                  <td className="py-4 px-4 text-[var(--text-secondary)]">{item.email}</td>
+                  <td className="py-4 px-4 text-[var(--text-secondary)] text-[13px] sm:text-[14px]">{new Date(item.created_at).toLocaleDateString()}</td>
+                  <td className="py-4 px-4">
+                    {item.role === 'admin' ? (
+                      <span className="badge-error capitalize">{item.role}</span>
+                    ) : (
+                      <span className="badge-brand capitalize">{item.role}</span>
+                    )}
                   </td>
-                  <td className="py-3 px-4 text-right space-x-2">
+                  <td className="py-4 px-4 text-right space-x-2">
                     <button
                       onClick={() => handleRoleToggle(item.id, item.role)}
-                      className="text-xs bg-[var(--bg-card)] border border-[var(--border-strong)] text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)] px-2.5 py-1 rounded-lg transition-all cursor-pointer"
+                      className="btn-secondary text-[12px] py-1 px-2.5 rounded-md cursor-pointer"
                     >
                       Toggle Role
                     </button>
                     <button
                       onClick={() => handleDeleteUser(item.id)}
                       disabled={isDeleting === item.id}
-                      className="text-xs bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/20 dark:text-rose-400 dark:border-rose-950/50 p-1.5 rounded-lg transition-all inline-flex items-center justify-center align-middle cursor-pointer"
+                      className="p-1.5 rounded-md text-[var(--color-error)] hover:bg-[var(--color-error-bg)] transition-colors inline-flex items-center justify-center align-middle cursor-pointer"
                       title="Delete User"
                     >
-                      {isDeleting === item.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                      {isDeleting === item.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                     </button>
                   </td>
                 </tr>

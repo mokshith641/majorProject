@@ -23,7 +23,7 @@ class GeminiProvider:
             or getattr(settings, "GEMINI_API_KEY", "")
             or os.environ.get("GEMINI_API_KEY", "")
         )
-        self.models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+        self.models = ["gemini-flash-latest", "gemini-pro-latest", "gemini-2.5-flash", "gemini-1.5-flash"]
 
     def is_available(self) -> bool:
         return bool(self.api_key and self.api_key.strip())

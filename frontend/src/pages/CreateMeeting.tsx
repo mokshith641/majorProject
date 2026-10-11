@@ -91,7 +91,6 @@ export const CreateMeeting: React.FC = () => {
           headers: { 'Content-Type': 'multipart/form-data' },
         });
 
-        // Direct user to meeting summary page after background AI processing
         navigate(`/meetings/${meetingId}`);
       } else if (activeTab === 'transcript') {
         // Submit raw transcript text
@@ -134,23 +133,23 @@ export const CreateMeeting: React.FC = () => {
     <div className="max-w-2xl mx-auto space-y-6">
       <button
         onClick={() => navigate(PATHS.DASHBOARD)}
-        className="inline-flex items-center gap-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
+        className="btn-secondary text-[13px] py-1.5 px-3 rounded-lg gap-1.5 cursor-pointer"
       >
         <ArrowLeft className="h-4 w-4" />
         Back to Dashboard
       </button>
 
-      <div className="glass-card rounded-2xl p-6 sm:p-8 space-y-6">
+      <div className="card-enterprise p-6 sm:p-8 space-y-6">
         {/* Header Title */}
-        <div className="flex items-center gap-3">
-          <div className="h-10 w-10 bg-[#e8f0fe] text-[#1a73e8] dark:bg-blue-900/30 dark:text-blue-400 rounded-xl flex items-center justify-center">
+        <div className="flex items-center gap-3.5">
+          <div className="h-11 w-11 bg-[var(--bg-elevated)] text-[var(--color-brand)] border border-[var(--border-subtle)] rounded-xl flex items-center justify-center shrink-0">
             {activeTab === 'live' && <Video className="h-5 w-5" />}
             {activeTab === 'audio' && <Upload className="h-5 w-5" />}
             {activeTab === 'transcript' && <FileText className="h-5 w-5" />}
           </div>
           <div>
-            <h2 className="text-xl font-bold text-[var(--text-primary)]">Create Smart Session</h2>
-            <p className="text-[var(--text-secondary)] text-sm">
+            <h2 className="text-[20px] sm:text-[22px] font-semibold text-[var(--text-primary)] tracking-tight">Create Smart Session</h2>
+            <p className="text-[14px] text-[var(--text-secondary)] mt-0.5">
               {activeTab === 'live' && 'Configure title and start recording meeting telemetry'}
               {activeTab === 'audio' && 'Upload a pre-recorded audio file to transcribe and summarize'}
               {activeTab === 'transcript' && 'Paste a raw transcript text to generate dynamic summaries'}
@@ -159,17 +158,17 @@ export const CreateMeeting: React.FC = () => {
         </div>
 
         {/* Tab Selection Row */}
-        <div className="flex bg-[var(--bg-card-secondary)] p-1 rounded-xl border border-[var(--border-subtle)]">
+        <div className="flex bg-[var(--bg-elevated)] p-1 rounded-lg border border-[var(--border-subtle)]">
           <button
             type="button"
             onClick={() => {
               setActiveTab('live');
               setErrorMsg(null);
             }}
-            className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+            className={`flex-1 flex items-center justify-center gap-2 py-2 text-[13px] font-medium rounded-md transition-all cursor-pointer ${
               activeTab === 'live'
-                ? 'bg-[#1a73e8] text-white shadow-xs'
-                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)]'
+                ? 'bg-[var(--color-brand)] text-white shadow-xs font-semibold'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
             }`}
           >
             <Video className="h-3.5 w-3.5" />
@@ -181,10 +180,10 @@ export const CreateMeeting: React.FC = () => {
               setActiveTab('audio');
               setErrorMsg(null);
             }}
-            className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+            className={`flex-1 flex items-center justify-center gap-2 py-2 text-[13px] font-medium rounded-md transition-all cursor-pointer ${
               activeTab === 'audio'
-                ? 'bg-[#1a73e8] text-white shadow-xs'
-                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)]'
+                ? 'bg-[var(--color-brand)] text-white shadow-xs font-semibold'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
             }`}
           >
             <Upload className="h-3.5 w-3.5" />
@@ -196,10 +195,10 @@ export const CreateMeeting: React.FC = () => {
               setActiveTab('transcript');
               setErrorMsg(null);
             }}
-            className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+            className={`flex-1 flex items-center justify-center gap-2 py-2 text-[13px] font-medium rounded-md transition-all cursor-pointer ${
               activeTab === 'transcript'
-                ? 'bg-[#1a73e8] text-white shadow-xs'
-                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)]'
+                ? 'bg-[var(--color-brand)] text-white shadow-xs font-semibold'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
             }`}
           >
             <FileText className="h-3.5 w-3.5" />
@@ -208,40 +207,40 @@ export const CreateMeeting: React.FC = () => {
         </div>
 
         {errorMsg && (
-          <p className="bg-rose-50 text-rose-700 dark:bg-rose-950/20 dark:text-rose-300 text-sm p-3.5 rounded-xl border border-rose-200 dark:border-rose-900/50">
+          <div className="badge-error w-full py-2 px-3 text-[13px] rounded-lg">
             {errorMsg}
-          </p>
+          </div>
         )}
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
           {/* Title input */}
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-2">
+            <label className="block text-[13px] font-semibold uppercase tracking-wider text-[var(--text-secondary)] mb-2">
               Session / Meeting Title
             </label>
             <input
               type="text"
               {...register('title', { required: 'Session title is required' })}
               placeholder="Design & Architecture Review"
-              className="w-full bg-[var(--bg-input)] border border-[var(--border-strong)] focus:border-[#1a73e8] text-[var(--text-primary)] rounded-xl px-4 py-2.5 text-sm transition-all outline-none"
+              className="input-enterprise py-2.5 text-[14px]"
             />
-            {errors.title && <p className="text-rose-600 dark:text-rose-400 text-xs mt-1">{errors.title.message}</p>}
+            {errors.title && <p className="text-[var(--color-error)] text-[12px] mt-1">{errors.title.message}</p>}
           </div>
 
           {/* Tab Specific Content */}
           {activeTab === 'audio' && (
             <div className="space-y-2">
-              <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+              <label className="block text-[13px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
                 Select Audio File
               </label>
               <div className="flex items-center justify-center w-full">
-                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-[var(--border-strong)] border-dashed rounded-2xl cursor-pointer bg-[var(--bg-card-secondary)] hover:bg-[var(--bg-surface-hover)] transition-all hover:border-[#1a73e8]">
+                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-[var(--border-subtle)] border-dashed rounded-xl cursor-pointer bg-[var(--bg-card-secondary)] hover:bg-[var(--bg-surface-hover)] transition-all hover:border-[var(--color-brand)]">
                   <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                    <Upload className="w-8 h-8 text-[var(--text-muted)] mb-2" />
-                    <p className="text-sm font-medium text-[var(--text-primary)]">
+                    <Upload className="w-7 h-7 text-[var(--text-muted)] mb-2" />
+                    <p className="text-[14px] font-medium text-[var(--text-primary)]">
                       {audioFile ? audioFile.name : 'Click to select recorded audio'}
                     </p>
-                    <p className="text-xs text-[var(--text-secondary)] mt-1">WAV or MP3 (Max 50MB)</p>
+                    <p className="text-[12px] text-[var(--text-muted)] mt-1">WAV or MP3 (Max 50MB)</p>
                   </div>
                   <input
                     type="file"
@@ -255,12 +254,12 @@ export const CreateMeeting: React.FC = () => {
           )}
 
           {activeTab === 'transcript' && (
-            <div className="space-y-4">
+            <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+                <label className="block text-[13px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
                   Meeting Transcript
                 </label>
-                <label className="inline-flex items-center gap-1.5 text-xs text-[#1a73e8] hover:text-[#1967d2] cursor-pointer font-semibold">
+                <label className="inline-flex items-center gap-1.5 text-[13px] text-[var(--color-brand)] hover:text-[var(--color-brand-hover)] cursor-pointer font-medium">
                   <Upload className="h-3.5 w-3.5" />
                   Upload Transcript File
                   <input
@@ -276,9 +275,9 @@ export const CreateMeeting: React.FC = () => {
                 onChange={(e) => setTranscriptText(e.target.value)}
                 placeholder="Priya: Good morning everyone...&#10;Arjun: Yes, let's start the review..."
                 rows={8}
-                className="w-full bg-[var(--bg-input)] border border-[var(--border-strong)] focus:border-[#1a73e8] text-[var(--text-primary)] rounded-xl px-4 py-2.5 text-sm transition-all outline-none resize-y font-mono"
+                className="input-enterprise font-mono text-[13px] leading-relaxed resize-y"
               />
-              <p className="text-xs text-[var(--text-secondary)]">
+              <p className="text-[12px] text-[var(--text-muted)]">
                 You can paste the transcript directly or click the upload button to load a .txt, .vtt, .srt, or .json file.
               </p>
             </div>
@@ -287,15 +286,15 @@ export const CreateMeeting: React.FC = () => {
           {/* Participant list fields */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+              <label className="block text-[13px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
                 Meeting Participants
               </label>
               <button
                 type="button"
                 onClick={() => append({ name: '', email: '' })}
-                className="flex items-center gap-1 text-xs text-[#1a73e8] hover:text-[#1967d2] transition-colors font-semibold cursor-pointer"
+                className="flex items-center gap-1 text-[13px] text-[var(--color-brand)] hover:text-[var(--color-brand-hover)] transition-colors font-medium cursor-pointer"
               >
-                <Plus className="h-3 w-3" />
+                <Plus className="h-3.5 w-3.5" />
                 Add Row
               </button>
             </div>
@@ -308,7 +307,7 @@ export const CreateMeeting: React.FC = () => {
                       type="text"
                       {...register(`participants.${index}.name` as const)}
                       placeholder="Name (e.g. Alice)"
-                      className="w-full bg-[var(--bg-input)] border border-[var(--border-strong)] focus:border-[#1a73e8] text-[var(--text-primary)] rounded-xl px-3.5 py-2 text-sm outline-none transition-all"
+                      className="input-enterprise text-[14px]"
                     />
                   </div>
                   <div className="flex-1">
@@ -316,14 +315,14 @@ export const CreateMeeting: React.FC = () => {
                       type="email"
                       {...register(`participants.${index}.email` as const)}
                       placeholder="Email (optional)"
-                      className="w-full bg-[var(--bg-input)] border border-[var(--border-strong)] focus:border-[#1a73e8] text-[var(--text-primary)] rounded-xl px-3.5 py-2 text-sm outline-none transition-all"
+                      className="input-enterprise text-[14px]"
                     />
                   </div>
                   {fields.length > 1 && (
                     <button
                       type="button"
                       onClick={() => remove(index)}
-                      className="p-2 text-[var(--text-muted)] hover:text-rose-500 hover:bg-[var(--bg-surface-hover)] rounded-lg mt-0.5 transition-colors cursor-pointer"
+                      className="p-2 text-[var(--text-muted)] hover:text-[var(--color-error)] hover:bg-[var(--bg-elevated)] rounded-lg transition-colors cursor-pointer"
                       title="Remove participant"
                     >
                       <Trash2 className="h-4 w-4" />
@@ -337,7 +336,7 @@ export const CreateMeeting: React.FC = () => {
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full py-3 bg-[#1a73e8] hover:bg-[#1967d2] disabled:opacity-50 text-white font-medium rounded-xl shadow-xs hover:shadow-md transition-all text-sm flex items-center justify-center gap-2 mt-4 cursor-pointer"
+            className="btn-primary w-full py-2.5 text-[14px] disabled:opacity-50 mt-4 cursor-pointer gap-2"
           >
             {isSubmitting ? (
               <>
