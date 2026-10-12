@@ -115,6 +115,7 @@ class MeetingProcessingPipeline:
         language: Optional[str] = None,
         custom_prompt: Optional[str] = None,
         participant_names: Optional[List[str]] = None,
+        expected_speakers: Optional[int] = None,
         live_caps: Optional[List[Dict[str, Any]]] = None,
         focus_score: Optional[float] = None,
         idle_percent: Optional[float] = None,
@@ -145,8 +146,17 @@ class MeetingProcessingPipeline:
                     if host_name:
                         participant_names.append(host_name)
                 for p in meeting.participants:
-                    if p.name and p.name not in participant_names:
-                        participant_names.append(p.name)
+                    if p.name:
+                        clean_p = p.name.strip()
+                        # Avoid loading generic placeholder labels from previous runs
+                        if (
+                            clean_p
+                            and clean_p not in participant_names
+                            and not clean_p.lower().startswith("participant")
+                            and not clean_p.lower().startswith("speaker")
+                            and clean_p.lower() != "unknown speaker"
+                        ):
+                            participant_names.append(clean_p)
 
             # ── Stage 1: Audio Validation & Preprocessing (15%) ───────────
             self._update_status(meeting_id, "UPLOADING", 15, "Validating audio format and inspecting diagnostics...")
@@ -205,16 +215,28 @@ class MeetingProcessingPipeline:
             self._update_status(meeting_id, "DIARIZING", 55, "Detecting distinct speakers via AssemblyAI...")
             logger.info("[DIARIZATION] AssemblyAI started")
             t_diarize_start = time.time()
-            expected_speakers = len(participant_names) if participant_names and len(participant_names) >= 2 else None
+
+            # Calculate expected speakers accurately:
+            # 1. Use user-specified expected_speakers if given (>= 2)
+            # 2. Or use count of genuine participant names if >= 2
+            # 3. Otherwise None (let AssemblyAI detect without forcing)
+            effective_expected_speakers = expected_speakers
+            if effective_expected_speakers is None and participant_names:
+                genuine_participants = [
+                    p for p in participant_names
+                    if not (p.strip().lower().startswith("participant") or p.strip().lower().startswith("speaker") or p.strip().lower() == "unknown speaker")
+                ]
+                if len(genuine_participants) >= 2:
+                    effective_expected_speakers = len(genuine_participants)
+
             speaker_intervals, diarize_provider = self.diarization_service.diarize(
                 audio_path=prepared_audio_path,
-                expected_speakers=expected_speakers,
+                expected_speakers=effective_expected_speakers,
                 participant_names=participant_names,
             )
             t_diarize_end = time.time()
             logger.info(f"[DIARIZATION] AssemblyAI completed in {t_diarize_end - t_diarize_start:.2f}s")
-            raw_spk_labels = sorted(list(set(str(i.get("speaker", "A")) for i in speaker_intervals)))
-            logger.info(f"[DIARIZATION] Detected speakers: {', '.join(raw_spk_labels)}")
+            raw_spk_labels = sorted(list(set(str(i.get("speaker", "A")) for i in speaker_intervals if i.get("speaker"))))
             telemetry["diarization_start"] = t_diarize_start
             telemetry["diarization_end"] = t_diarize_end
             telemetry["diarization_duration"] = round(t_diarize_end - t_diarize_start, 2)
@@ -223,7 +245,6 @@ class MeetingProcessingPipeline:
 
             # ── Stage 4: Transcript Alignment (70%) ───────────────────────
             self._update_status(meeting_id, "ALIGNING", 70, "Aligning transcript segments with speakers...")
-            logger.info(f"[ALIGNMENT] Transcript segments: {len(raw_segments)}")
             logger.info(f"[ALIGNMENT] Diarization intervals: {len(speaker_intervals)}")
             t_align_start = time.time()
             aligned_segments = self.alignment_service.align(
@@ -234,15 +255,22 @@ class MeetingProcessingPipeline:
             telemetry["alignment_duration"] = round(time.time() - t_align_start, 2)
             raw_transcript_text = TranscriptCleanupService.format_transcript_text(aligned_segments, use_cleaned=False)
 
-            # Auto-register newly detected speakers as meeting participants
+            # Auto-register newly detected genuine human speakers (do not register generic 'Participant 1', 'Participant 2')
             detected_speakers = set(seg.get("speaker_name") for seg in aligned_segments if seg.get("speaker_name"))
             existing_names = {p.name.lower() for p in meeting.participants}
             if meeting.host:
                 existing_names.add((meeting.host.full_name or "").lower())
             for spk in detected_speakers:
-                if spk and spk.lower() not in existing_names and not spk.lower().startswith("speaker"):
-                    new_p = Participant(meeting_id=meeting.id, name=spk)
-                    db.add(new_p)
+                if spk:
+                    spk_clean = spk.strip().lower()
+                    if (
+                        spk_clean not in existing_names
+                        and not spk_clean.startswith("participant")
+                        and not spk_clean.startswith("speaker")
+                        and spk_clean != "unknown speaker"
+                    ):
+                        new_p = Participant(meeting_id=meeting.id, name=spk)
+                        db.add(new_p)
 
             # ── Stage 5: Light Transcript Cleanup (80%) ───────────────────
             self._update_status(meeting_id, "CLEANING", 80, "Applying light punctuation formatting and term normalization...")
@@ -253,6 +281,15 @@ class MeetingProcessingPipeline:
 
             suspicious_segments = sum(1 for seg in cleaned_segments if seg.get("quality_flags"))
             telemetry["suspicious_segments_count"] = suspicious_segments
+
+            aligned_count = sum(1 for seg in cleaned_segments if seg.get("speaker_id") != "UNKNOWN")
+            unassigned_count = sum(1 for seg in cleaned_segments if seg.get("speaker_id") == "UNKNOWN")
+            speaker_mapping = {}
+            for seg in cleaned_segments:
+                sid = seg.get("speaker_id")
+                sname = seg.get("speaker_name")
+                if sid and sname and sid not in speaker_mapping:
+                    speaker_mapping[sid] = sname
 
             # Persist diagnostics dictionary
             diagnostics_payload = {
@@ -266,9 +303,14 @@ class MeetingProcessingPipeline:
                 "transcription_provider": stt_provider,
                 "transcription_model": telemetry.get("transcription_model", "whisper-large-v3-turbo"),
                 "diarization_provider": diarize_provider,
+                "expected_speakers": effective_expected_speakers,
+                "raw_speaker_ids": raw_spk_labels,
                 "detected_speakers_count": len(detected_speakers),
                 "detected_speakers": sorted(list(detected_speakers)),
+                "speaker_mapping": speaker_mapping,
                 "transcript_segments_count": len(cleaned_segments),
+                "aligned_segments_count": aligned_count,
+                "unassigned_segments_count": unassigned_count,
                 "diarization_segments_count": len(speaker_intervals),
                 "suspicious_segments_count": suspicious_segments,
                 "processing_mode": mode,
@@ -294,6 +336,9 @@ class MeetingProcessingPipeline:
                 )
                 db.add(db_transcript)
             db.commit()
+
+            logger.info(f"[DATABASE] Persisted transcript segments: {len(cleaned_segments)}")
+            logger.info(f"[API] Unique speakers returned: {len(detected_speakers)}")
 
             # ── Stage 6: AI Summarization & Intelligence (90%) ────────────
             self._update_status(meeting_id, "ANALYZING", 90, "Synthesizing executive summary and action items...")

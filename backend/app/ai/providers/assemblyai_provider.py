@@ -91,6 +91,7 @@ class AssemblyAIDiarizationProvider(SpeakerDiarizationProvider):
 
         import assemblyai as aai
 
+        logger.info(f"[DIARIZATION] Expected speakers: {expected_speakers}")
         logger.info(
             f"[DIARIZATION] AssemblyAI started for '{os.path.basename(audio_path)}' "
             f"(expected_speakers={expected_speakers}, min={min_speakers}, max={max_speakers})..."
@@ -103,10 +104,23 @@ class AssemblyAIDiarizationProvider(SpeakerDiarizationProvider):
         if configured_lang and configured_lang.lower() not in ["auto", "", "none"]:
             config_kwargs["language_code"] = configured_lang.lower()
         if expected_speakers and expected_speakers >= 2:
-            config_kwargs["speakers_expected"] = expected_speakers
+            config_kwargs["speakers_expected"] = int(expected_speakers)
+
+        # Configure speaker_options if min/max bounds are supplied
+        speaker_opt_kwargs: Dict[str, Any] = {}
+        if min_speakers is not None and min_speakers >= 1:
+            speaker_opt_kwargs["min_speakers_expected"] = int(min_speakers)
+        if max_speakers is not None and max_speakers >= 1:
+            speaker_opt_kwargs["max_speakers_expected"] = int(max_speakers)
+        if speaker_opt_kwargs and hasattr(aai, "types") and hasattr(aai.types, "SpeakerOptions"):
+            try:
+                config_kwargs["speaker_options"] = aai.types.SpeakerOptions(**speaker_opt_kwargs)
+            except Exception as opt_err:
+                logger.warning(f"[DIARIZATION] Could not set SpeakerOptions: {opt_err}")
 
         config = aai.TranscriptionConfig(**config_kwargs)
         transcriber = aai.Transcriber(config=config)
+        logger.info("[DIARIZATION] AssemblyAI request submitted")
         last_error = None
 
         for attempt in range(retries + 1):
@@ -141,7 +155,8 @@ class AssemblyAIDiarizationProvider(SpeakerDiarizationProvider):
                     })
 
                 detected_speakers = sorted(list(set(i["speaker"] for i in intervals)))
-                logger.info(f"[DIARIZATION] Detected speakers: {', '.join(detected_speakers)}")
+                logger.info(f"[DIARIZATION] Raw speaker IDs detected: {', '.join(detected_speakers)}")
+                logger.info(f"[DIARIZATION] Unique detected speakers: {len(detected_speakers)}")
                 if intervals:
                     logger.info(f"[DIARIZATION] Raw AssemblyAI sample: {intervals[:2]}")
 

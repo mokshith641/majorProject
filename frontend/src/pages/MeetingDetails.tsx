@@ -91,6 +91,29 @@ interface TelemetryLog {
   focus_score: number;
 }
 
+interface ParticipantStat {
+  speaker: string;
+  speaker_name: string;
+  utterance_count: number;
+  total_speaking_seconds: number;
+  speaking_percentage: number;
+  word_count: number;
+}
+
+interface AnalyticsData {
+  available: boolean;
+  keyboard_hits?: number | null;
+  mouse_clicks?: number | null;
+  idle_seconds?: number | null;
+  active_window?: string | null;
+  face_present_seconds?: number | null;
+  eye_attention_score?: number | null;
+  focus_score?: number | null;
+  participant_stats?: ParticipantStat[];
+  total_speaking_seconds?: number;
+  total_utterances?: number;
+}
+
 interface PipelineStage {
   key: string;
   label: string;
@@ -119,10 +142,11 @@ export const MeetingDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [meeting, setMeeting] = useState<MeetingDetailsType | null>(null);
-  const [telemetry, setTelemetry] = useState<TelemetryLog | null>(null);
+  const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
+  const [isAnalyticsLoading, setIsAnalyticsLoading] = useState(false);
+  const [analyticsError, setAnalyticsError] = useState<string | null>(null);
   const [processingStatus, setProcessingStatus] = useState<ProcessingStatusType | null>(null);
   const [activeTab, setActiveTab] = useState<'summary' | 'transcript' | 'engagement'>('summary');
-  const [transcriptViewMode, setTranscriptViewMode] = useState<'cleaned' | 'raw'>('cleaned');
   const [searchQuery, setSearchQuery] = useState('');
   const [showDebugPanel, setShowDebugPanel] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -133,12 +157,17 @@ export const MeetingDetails: React.FC = () => {
         const res = await api.get<MeetingDetailsType>(`/meetings/${id}`);
         setMeeting(res.data);
 
-        // Fetch telemetry
+        // Fetch meeting engagement analytics
+        setIsAnalyticsLoading(true);
+        setAnalyticsError(null);
         try {
-          const telemRes = await api.get<TelemetryLog>(`/analytics/meeting/${id}`);
-          setTelemetry(telemRes.data);
-        } catch {
-          // Telemetry is optional
+          const telemRes = await api.get<AnalyticsData>(`/analytics/meeting/${id}`);
+          setAnalytics(telemRes.data);
+        } catch (err: any) {
+          console.warn('Meeting analytics not available or failed to load:', err);
+          setAnalyticsError(err?.response?.data?.detail || 'Failed to load engagement analytics');
+        } finally {
+          setIsAnalyticsLoading(false);
         }
 
         // Fetch pipeline status if meeting is processing
@@ -183,6 +212,16 @@ export const MeetingDetails: React.FC = () => {
     return () => clearInterval(interval);
   }, [id, meeting?.status]);
 
+  // Diagnostic logging for frontend transcript speakers
+  useEffect(() => {
+    if (meeting?.transcript?.raw_segments?.length) {
+      const uniqueSpeakers = Array.from(
+        new Set(meeting.transcript.raw_segments.map((s) => s.speaker_name || s.speaker || 'Unknown Speaker'))
+      );
+      console.log(`[FRONTEND] Transcript speaker count: ${uniqueSpeakers.length}`, uniqueSpeakers);
+    }
+  }, [meeting?.transcript]);
+
   const handleDownloadPDF = async () => {
     try {
       const response = await api.get(`/reports/${id}/download`, {
@@ -214,26 +253,39 @@ export const MeetingDetails: React.FC = () => {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  // Restrained enterprise color mapping for speakers
+  // Rich enterprise color palette supporting an arbitrary number of speakers
   const speakerPalette = [
-    '#2563EB', // Blue
-    '#12805C', // Emerald
-    '#7C3AED', // Purple
-    '#D97706', // Amber
-    '#DC2626', // Crimson
-    '#0891B2', // Cyan
+    '#2563EB', // Blue (Participant 1)
+    '#059669', // Emerald (Participant 2)
+    '#7C3AED', // Purple (Participant 3)
+    '#D97706', // Amber (Participant 4)
+    '#DC2626', // Crimson (Participant 5)
+    '#0891B2', // Cyan (Participant 6)
+    '#4F46E5', // Indigo (Participant 7)
+    '#EA580C', // Orange (Participant 8)
+    '#0D9488', // Teal (Participant 9)
+    '#9333EA', // Violet (Participant 10)
+    '#BE185D', // Pink (Participant 11)
+    '#475569', // Slate (Participant 12)
   ];
 
-  const speakerColorMap = new Map<string, string>();
-  let paletteIdx = 0;
-
-  const getSpeakerColor = (speakerName: string) => {
-    const name = speakerName || 'Speaker 1';
-    if (!speakerColorMap.has(name)) {
-      speakerColorMap.set(name, speakerPalette[paletteIdx % speakerPalette.length]);
-      paletteIdx++;
+  const getSpeakerColor = (speakerName: string): string => {
+    if (!speakerName || speakerName.toLowerCase() === 'unknown speaker' || speakerName.toLowerCase() === 'unknown') {
+      return '#6B7280'; // Neutral slate/gray for unknown or unassigned speaker
     }
-    return speakerColorMap.get(name)!;
+    // Extract participant index if formatted as "Participant N"
+    const match = speakerName.match(/Participant\s+(\d+)/i);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      return speakerPalette[(num - 1) % speakerPalette.length];
+    }
+    // Fallback: deterministic string hash so the same speaker name always gets the same color
+    let hash = 0;
+    for (let i = 0; i < speakerName.length; i++) {
+      hash = speakerName.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const idx = Math.abs(hash) % speakerPalette.length;
+    return speakerPalette[idx];
   };
 
   const safeActionItems = (): ActionItem[] => {
@@ -272,12 +324,29 @@ export const MeetingDetails: React.FC = () => {
   const filteredSegments = rawSegmentsList.filter((seg) => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
-    const textToSearch = (transcriptViewMode === 'cleaned' ? seg.cleaned_text || seg.text : seg.raw_text || seg.text) || '';
+    const textToSearch = (seg.cleaned_text?.trim() ? seg.cleaned_text : seg.text || seg.raw_text || '').trim();
     const speakerToSearch = seg.speaker_name || seg.speaker || '';
     return textToSearch.toLowerCase().includes(q) || speakerToSearch.toLowerCase().includes(q);
   });
 
   const diagnosticsData = meeting?.transcript?.diagnostics || {};
+
+  // Actual unique detected speakers from transcript segments (excluding any unassigned / unknown fallback)
+  const uniqueDetectedSpeakers = React.useMemo(() => {
+    const set = new Set<string>();
+    rawSegmentsList.forEach((seg) => {
+      const spk = (seg.speaker_name || seg.speaker || '').trim();
+      if (spk && !spk.toLowerCase().includes('unknown') && !spk.toLowerCase().includes('unassigned')) {
+        set.add(spk);
+      }
+    });
+    return Array.from(set);
+  }, [rawSegmentsList]);
+
+  const participantCount =
+    uniqueDetectedSpeakers.length > 0
+      ? uniqueDetectedSpeakers.length
+      : diagnosticsData.detected_speakers_count || meeting?.participants?.length || 0;
 
   if (isLoading) {
     return (
@@ -374,7 +443,7 @@ export const MeetingDetails: React.FC = () => {
           </span>
           <span className="flex items-center gap-2">
             <Users className="h-4 w-4 text-[var(--text-muted)] shrink-0" />
-            {meeting.participants.length} Participants
+            {participantCount} {participantCount === 1 ? 'Participant' : 'Participants'}
           </span>
         </div>
       </div>
@@ -640,7 +709,7 @@ export const MeetingDetails: React.FC = () => {
         {/* TRANSCRIPT TAB (Enhanced Typography & Readability) */}
         {activeTab === 'transcript' && (
           <div className="card-enterprise p-6 sm:p-8 space-y-6">
-            {/* Header controls: Search & Cleaned/Raw Toggle */}
+            {/* Header controls: Search */}
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 border-b border-[var(--border-subtle)] pb-5">
               <div>
                 <h2 className="text-[19px] sm:text-[21px] font-semibold text-[var(--text-primary)] tracking-tight">Meeting Transcript</h2>
@@ -668,30 +737,6 @@ export const MeetingDetails: React.FC = () => {
                       Clear
                     </button>
                   )}
-                </div>
-
-                {/* Cleaned vs Raw Toggle */}
-                <div className="flex p-1 bg-[var(--bg-elevated)] rounded-lg border border-[var(--border-subtle)] text-[13px] font-semibold">
-                  <button
-                    onClick={() => setTranscriptViewMode('cleaned')}
-                    className={`px-3 py-1.5 rounded-md transition-all cursor-pointer ${
-                      transcriptViewMode === 'cleaned'
-                        ? 'bg-[var(--color-brand)] text-white shadow-xs'
-                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-                    }`}
-                  >
-                    Cleaned
-                  </button>
-                  <button
-                    onClick={() => setTranscriptViewMode('raw')}
-                    className={`px-3 py-1.5 rounded-md transition-all cursor-pointer ${
-                      transcriptViewMode === 'raw'
-                        ? 'bg-[var(--color-brand)] text-white shadow-xs'
-                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-                    }`}
-                  >
-                    Raw
-                  </button>
                 </div>
               </div>
             </div>
@@ -722,10 +767,9 @@ export const MeetingDetails: React.FC = () => {
                 </div>
               ) : (
                 filteredSegments.map((seg, idx) => {
-                  const speakerDisplay = seg.speaker_name || seg.speaker || 'Participant 1';
+                  const speakerDisplay = seg.speaker_name || seg.speaker || 'Unknown Speaker';
                   const speakerColor = getSpeakerColor(speakerDisplay);
-                  const textToShow =
-                    (transcriptViewMode === 'cleaned' ? seg.cleaned_text || seg.text : seg.raw_text || seg.text) || '';
+                  const textToShow = (seg.cleaned_text?.trim() ? seg.cleaned_text : seg.text || seg.raw_text || '').trim();
                   const hasRepetition = seg.quality_flags?.includes('possible_repetition');
 
                   return (
@@ -779,52 +823,185 @@ export const MeetingDetails: React.FC = () => {
         )}
 
         {/* ENGAGEMENT TAB */}
-        {activeTab === 'engagement' && telemetry && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Visual Gauge */}
-            <div className="card-enterprise p-6 sm:p-7 space-y-6 flex flex-col justify-center">
-              <h2 className="text-[19px] sm:text-[21px] font-semibold text-[var(--text-primary)] text-center tracking-tight">Session Focus Score</h2>
-              <div className="relative h-40 w-40 mx-auto flex items-center justify-center rounded-full border-4 border-dashed border-[var(--border-subtle)]">
-                <div className="absolute inset-2 rounded-full bg-[var(--bg-elevated)] flex flex-col items-center justify-center shadow-xs">
-                  <span className="text-[34px] font-semibold text-[var(--text-primary)]">{telemetry.focus_score}%</span>
-                  <span className="text-[12px] text-[var(--text-muted)] uppercase tracking-wider mt-1 font-medium">Indexed</span>
-                </div>
+        {activeTab === 'engagement' && (
+          <div>
+            {isAnalyticsLoading ? (
+              <div className="card-enterprise p-12 text-center flex flex-col items-center justify-center space-y-3">
+                <div className="h-8 w-8 animate-spin rounded-full border-3 border-[var(--color-brand)] border-t-transparent" />
+                <p className="text-[14px] text-[var(--text-secondary)]">Loading engagement analytics...</p>
               </div>
-              <p className="text-[14px] text-[var(--text-secondary)] text-center leading-relaxed">
-                Calculated dynamically from gaze direction and desktop activity telemetry.
-              </p>
-            </div>
-
-            {/* Desktop Interaction details */}
-            <div className="card-enterprise p-6 sm:p-7 lg:col-span-2 space-y-6">
-              <h2 className="text-[19px] sm:text-[21px] font-semibold text-[var(--text-primary)] tracking-tight">Interactive Telemetry Log</h2>
-
-              <div className="grid grid-cols-3 gap-4">
-                <div className="bg-[var(--bg-card-secondary)] border border-[var(--border-subtle)] p-4 sm:p-5 rounded-xl text-center">
-                  <p className="text-[var(--text-muted)] text-[12px] font-semibold uppercase tracking-wider">Keystrokes</p>
-                  <p className="text-[26px] sm:text-[28px] font-semibold text-[var(--text-primary)] mt-1">
-                    {telemetry.keyboard_hits}
-                  </p>
-                </div>
-                <div className="bg-[var(--bg-card-secondary)] border border-[var(--border-subtle)] p-4 sm:p-5 rounded-xl text-center">
-                  <p className="text-[var(--text-muted)] text-[12px] font-semibold uppercase tracking-wider">Clicks</p>
-                  <p className="text-[26px] sm:text-[28px] font-semibold text-[var(--text-primary)] mt-1">
-                    {telemetry.mouse_clicks}
-                  </p>
-                </div>
-                <div className="bg-[var(--bg-card-secondary)] border border-[var(--border-subtle)] p-4 sm:p-5 rounded-xl text-center">
-                  <p className="text-[var(--text-muted)] text-[12px] font-semibold uppercase tracking-wider">Idle Time</p>
-                  <p className="text-[26px] sm:text-[28px] font-semibold text-[var(--text-primary)] mt-1">
-                    {telemetry.idle_seconds}s
-                  </p>
-                </div>
+            ) : analyticsError ? (
+              <div className="card-enterprise p-8 text-center space-y-3 border-l-4 border-l-[var(--color-error)]">
+                <AlertTriangle className="h-6 w-6 text-[var(--color-error)] mx-auto" />
+                <h3 className="text-[16px] font-semibold text-[var(--text-primary)]">Unable to load analytics</h3>
+                <p className="text-[14px] text-[var(--text-secondary)]">{analyticsError}</p>
               </div>
-
-              <div className="bg-[var(--bg-card-secondary)] p-4 sm:p-5 rounded-xl border border-[var(--border-subtle)] flex items-center justify-between text-[14px] sm:text-[15px]">
-                <span className="text-[var(--text-secondary)]">Dominant Application Focused:</span>
-                <strong className="text-[var(--text-primary)] font-semibold">{telemetry.active_window}</strong>
+            ) : !analytics || !analytics.available ? (
+              <div className="card-enterprise p-12 text-center space-y-3">
+                <Activity className="h-10 w-10 text-[var(--text-muted)] mx-auto" />
+                <h3 className="text-[17px] font-semibold text-[var(--text-primary)]">
+                  Engagement data is not available for this meeting.
+                </h3>
+                <p className="text-[14px] text-[var(--text-secondary)] max-w-md mx-auto">
+                  No telemetry logs or participant voice activity metrics were recorded during this session.
+                </p>
               </div>
-            </div>
+            ) : (
+              <div className="space-y-6">
+                {/* Top Metrics Row: Focus Score & Desktop Activity (if telemetry recorded) */}
+                {(analytics.focus_score != null || analytics.keyboard_hits != null) && (
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* Visual Gauge */}
+                    {analytics.focus_score != null && (
+                      <div className="card-enterprise p-6 sm:p-7 space-y-6 flex flex-col justify-center">
+                        <h2 className="text-[19px] sm:text-[21px] font-semibold text-[var(--text-primary)] text-center tracking-tight">
+                          Session Focus Score
+                        </h2>
+                        <div className="relative h-40 w-40 mx-auto flex items-center justify-center rounded-full border-4 border-dashed border-[var(--border-subtle)]">
+                          <div className="absolute inset-2 rounded-full bg-[var(--bg-elevated)] flex flex-col items-center justify-center shadow-xs">
+                            <span className="text-[34px] font-semibold text-[var(--text-primary)]">
+                              {Math.round(analytics.focus_score ?? 0)}%
+                            </span>
+                            <span className="text-[12px] text-[var(--text-muted)] uppercase tracking-wider mt-1 font-medium">
+                              Indexed
+                            </span>
+                          </div>
+                        </div>
+                        <p className="text-[14px] text-[var(--text-secondary)] text-center leading-relaxed">
+                          Calculated dynamically from gaze direction and desktop activity telemetry.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Desktop Interaction details */}
+                    {analytics.keyboard_hits != null && (
+                      <div className={`card-enterprise p-6 sm:p-7 ${analytics.focus_score != null ? 'lg:col-span-2' : 'lg:col-span-3'} space-y-6`}>
+                        <h2 className="text-[19px] sm:text-[21px] font-semibold text-[var(--text-primary)] tracking-tight">
+                          Interactive Telemetry Log
+                        </h2>
+
+                        <div className="grid grid-cols-3 gap-4">
+                          <div className="bg-[var(--bg-card-secondary)] border border-[var(--border-subtle)] p-4 sm:p-5 rounded-xl text-center">
+                            <p className="text-[var(--text-muted)] text-[12px] font-semibold uppercase tracking-wider">Keystrokes</p>
+                            <p className="text-[26px] sm:text-[28px] font-semibold text-[var(--text-primary)] mt-1">
+                              {analytics.keyboard_hits ?? 0}
+                            </p>
+                          </div>
+                          <div className="bg-[var(--bg-card-secondary)] border border-[var(--border-subtle)] p-4 sm:p-5 rounded-xl text-center">
+                            <p className="text-[var(--text-muted)] text-[12px] font-semibold uppercase tracking-wider">Clicks</p>
+                            <p className="text-[26px] sm:text-[28px] font-semibold text-[var(--text-primary)] mt-1">
+                              {analytics.mouse_clicks ?? 0}
+                            </p>
+                          </div>
+                          <div className="bg-[var(--bg-card-secondary)] border border-[var(--border-subtle)] p-4 sm:p-5 rounded-xl text-center">
+                            <p className="text-[var(--text-muted)] text-[12px] font-semibold uppercase tracking-wider">Idle Time</p>
+                            <p className="text-[26px] sm:text-[28px] font-semibold text-[var(--text-primary)] mt-1">
+                              {analytics.idle_seconds ?? 0}s
+                            </p>
+                          </div>
+                        </div>
+
+                        {analytics.active_window && (
+                          <div className="bg-[var(--bg-card-secondary)] p-4 sm:p-5 rounded-xl border border-[var(--border-subtle)] flex items-center justify-between text-[14px] sm:text-[15px]">
+                            <span className="text-[var(--text-secondary)]">Dominant Application Focused:</span>
+                            <strong className="text-[var(--text-primary)] font-semibold">{analytics.active_window}</strong>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Participant Speaking Distribution & Statistics */}
+                {analytics.participant_stats && analytics.participant_stats.length > 0 && (
+                  <div className="card-enterprise p-6 sm:p-7 space-y-6">
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border-subtle)] pb-4">
+                      <div>
+                        <h2 className="text-[19px] sm:text-[21px] font-semibold text-[var(--text-primary)] tracking-tight">
+                          Participant Voice Engagement
+                        </h2>
+                        <p className="text-[13px] text-[var(--text-secondary)] mt-0.5">
+                          Speaking time share and utterance frequency across detected speakers
+                        </p>
+                      </div>
+                      <span className="badge-brand text-[12px] py-1 px-3">
+                        {analytics.participant_stats.length} {analytics.participant_stats.length === 1 ? 'Speaker' : 'Speakers'}
+                      </span>
+                    </div>
+
+                    {/* Visual Segmented Progress Bar */}
+                    <div className="space-y-2">
+                      <div className="h-4 w-full bg-[var(--border-subtle)] rounded-full overflow-hidden flex shadow-2xs">
+                        {analytics.participant_stats.map((stat, idx) => {
+                          const color = getSpeakerColor(stat.speaker_name || stat.speaker);
+                          return (
+                            <div
+                              key={idx}
+                              style={{ width: `${stat.speaking_percentage}%`, backgroundColor: color }}
+                              className="h-full transition-all duration-500 relative group"
+                              title={`${stat.speaker_name}: ${stat.speaking_percentage}% (${formatDuration(stat.total_speaking_seconds)})`}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Participant Stats Table / Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {analytics.participant_stats.map((stat, idx) => {
+                        const displayName = stat.speaker_name || stat.speaker;
+                        const color = getSpeakerColor(displayName);
+                        return (
+                          <div
+                            key={idx}
+                            className="bg-[var(--bg-card-secondary)] p-4 sm:p-5 rounded-xl border border-[var(--border-subtle)] space-y-3"
+                            style={{ borderLeftColor: color, borderLeftWidth: '4px' }}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2.5">
+                                <div
+                                  className="h-7 w-7 rounded-full flex items-center justify-center text-white text-[12px] font-bold shrink-0"
+                                  style={{ backgroundColor: color }}
+                                >
+                                  {displayName.replace(/[^0-9]/g, '') || displayName.slice(0, 1)}
+                                </div>
+                                <span className="text-[15px] font-semibold text-[var(--text-primary)]">
+                                  {displayName}
+                                </span>
+                              </div>
+                              <span className="font-mono text-[14px] font-semibold" style={{ color }}>
+                                {stat.speaking_percentage}%
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-2 pt-2 border-t border-[var(--border-subtle)] text-[12px]">
+                              <div>
+                                <span className="text-[var(--text-muted)] block">Speaking</span>
+                                <span className="font-semibold text-[var(--text-primary)]">
+                                  {formatDuration(stat.total_speaking_seconds)}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-[var(--text-muted)] block">Utterances</span>
+                                <span className="font-semibold text-[var(--text-primary)]">
+                                  {stat.utterance_count}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-[var(--text-muted)] block">Words</span>
+                                <span className="font-semibold text-[var(--text-primary)]">
+                                  {stat.word_count}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>

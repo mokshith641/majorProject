@@ -162,7 +162,7 @@ class TranscriptCleanupService:
         """Formats segments into a canonical multi-speaker transcript block."""
         lines = []
         for seg in segments:
-            speaker = seg.get("speaker_name") or seg.get("speaker") or "Participant 1"
+            speaker = seg.get("speaker_name") or seg.get("speaker") or "Unknown Speaker"
             text_field = "cleaned_text" if use_cleaned else "raw_text"
             text = (seg.get(text_field) or seg.get("text") or "").strip()
             if text:

@@ -58,13 +58,18 @@ def create_meeting(
 
     # Insert participants
     for part in meeting_in.participants:
-        db_part = Participant(
-            meeting_id=meeting.id,
-            name=part.name,
-            email=part.email,
-            join_time=datetime.utcnow()
-        )
-        db.add(db_part)
+        # Support comma/semicolon/newline-separated names in a single entry
+        raw_names = [n.strip() for n in part.name.replace(";", ",").replace("\n", ",").split(",") if n.strip()]
+        if not raw_names:
+            continue
+        for idx, sub_name in enumerate(raw_names):
+            db_part = Participant(
+                meeting_id=meeting.id,
+                name=sub_name,
+                email=part.email if idx == 0 else None,
+                join_time=datetime.utcnow()
+            )
+            db.add(db_part)
     
     db.commit()
     db.refresh(meeting)
@@ -551,8 +556,10 @@ def debug_meeting_diarization(
     current_user: User = Depends(deps.get_current_active_user),
 ) -> Any:
     """
-    Debug endpoint to inspect real AssemblyAI speaker diarization output,
-    transcript segment alignment, speaker counts, and raw audio metrics.
+    Development diagnostic endpoint conforming to Section 8:
+    Returns expected participant count, raw diarization speaker IDs,
+    final transcript speaker IDs, aligned/unassigned segment counts,
+    dynamic speaker mapping, and processing errors/warnings.
     """
     meeting = db.query(Meeting).filter(Meeting.id == id).first()
     if not meeting:
@@ -568,24 +575,33 @@ def debug_meeting_diarization(
 
     transcript = db.query(Transcript).filter(Transcript.meeting_id == id).first()
     segments = transcript.raw_segments if transcript and transcript.raw_segments else []
+    diag = (transcript.diagnostics or {}) if transcript else {}
+    pipeline_status = meeting_pipeline.get_status(id)
 
-    detected_speakers_map = {}
-    for seg in segments:
-        spk_id = seg.get("speaker_id") or "A"
-        spk_name = seg.get("speaker_name") or seg.get("speaker") or "Participant 1"
-        if spk_id not in detected_speakers_map:
-            detected_speakers_map[spk_id] = {
-                "speaker_id": spk_id,
-                "speaker_name": spk_name,
-            }
-    detected_speakers = list(detected_speakers_map.values())
-
-    unique_speakers = list(dict.fromkeys(
-        seg.get("speaker_name") or seg.get("speaker") or "Unknown"
-        for seg in segments
+    # Unique detected speaker IDs from final transcript
+    final_spk_ids = list(dict.fromkeys(
+        str(seg.get("speaker_id") or "A") for seg in segments
     ))
 
-    pipeline_status = meeting_pipeline.get_status(id)
+    # Unique detected speaker names from final transcript
+    final_spk_names = list(dict.fromkeys(
+        str(seg.get("speaker_name") or seg.get("speaker") or "Unknown Speaker") for seg in segments
+    ))
+
+    aligned_count = sum(1 for seg in segments if str(seg.get("speaker_id", "")).upper() not in ["UNKNOWN", ""])
+    unassigned_count = sum(1 for seg in segments if str(seg.get("speaker_id", "")).upper() in ["UNKNOWN", ""])
+
+    raw_diarization_ids = diag.get("raw_speaker_ids") or final_spk_ids
+    expected_count = diag.get("expected_speakers")
+
+    # Dynamic speaker mapping
+    speaker_mapping = diag.get("speaker_mapping", {})
+    if not speaker_mapping:
+        for seg in segments:
+            sid = seg.get("speaker_id")
+            sname = seg.get("speaker_name")
+            if sid and sname and sid not in speaker_mapping:
+                speaker_mapping[sid] = sname
 
     from app.ai.providers.assemblyai_provider import AssemblyAIProvider
     from app.ai.providers.groq_provider import GroqProvider
@@ -596,9 +612,25 @@ def debug_meeting_diarization(
     audio_exists = audio_path is not None and os.path.exists(audio_path)
     audio_size = os.path.getsize(audio_path) if audio_exists else 0
 
+    errors_and_warnings = []
+    if pipeline_status.get("error"):
+        errors_and_warnings.append(str(pipeline_status["error"]))
+    if diag.get("warnings"):
+        errors_and_warnings.extend(diag["warnings"])
+
     return {
-        "detected_speakers": detected_speakers,
-        "segments": segments,
+        # ── Section 8 Diagnostic Contract ─────────────────────────────
+        "expected_participant_count": expected_count,
+        "raw_diarization_speaker_ids": raw_diarization_ids,
+        "final_transcript_speaker_ids": final_spk_ids,
+        "final_transcript_speakers": final_spk_names,
+        "total_transcript_segments": len(segments),
+        "aligned_segments_count": aligned_count,
+        "unassigned_segments_count": unassigned_count,
+        "speaker_mapping": speaker_mapping,
+        "processing_errors_and_warnings": errors_and_warnings,
+
+        # ── Supplementary Context ─────────────────────────────────────
         "meeting_id": id,
         "meeting_title": meeting.title,
         "meeting_status": meeting.status,
@@ -615,17 +647,9 @@ def debug_meeting_diarization(
             "groq_key_configured": bool(getattr(settings, "GROQ_API_KEY", None)),
             "groq_model": getattr(settings, "GROQ_TRANSCRIPTION_MODEL", "whisper-large-v3-turbo"),
         },
-        "diarization": {
-            "total_segments": len(segments),
-            "unique_speakers": unique_speakers,
-            "speaker_count": len(unique_speakers),
-            "sample_segments": segments[:10],
-        },
-        "diagnostics": transcript.diagnostics if transcript and transcript.diagnostics else {},
-        "raw_transcript": transcript.raw_transcript if transcript else None,
-        "cleaned_transcript": transcript.cleaned_transcript if transcript else None,
-        "full_transcript_preview": transcript.full_text[:500] if transcript and transcript.full_text else None,
+        "diagnostics": diag,
         "pipeline_status": pipeline_status,
+        "segments": segments,
     }
 
 
@@ -635,11 +659,12 @@ def trigger_meeting_processing(
     background_tasks: BackgroundTasks,
     mode: str = "fast",
     language: Optional[str] = None,
+    expected_speakers: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ) -> Any:
     """
-    Phase 12: Dedicated non-blocking endpoint to trigger or re-run processing on a meeting recording.
+    Dedicated non-blocking endpoint to trigger or re-run processing on a meeting recording.
     Returns immediately with {"meeting_id": id, "status": "queued"}.
     """
     meeting = db.query(Meeting).filter(Meeting.id == id).first()
@@ -662,11 +687,19 @@ def trigger_meeting_processing(
     db.commit()
 
     participant_names = []
-    if meeting.host:
-        participant_names.append(meeting.host.full_name or meeting.host.email)
+    if meeting.host and meeting.host.full_name:
+        participant_names.append(meeting.host.full_name)
     for p in meeting.participants:
         if p.name:
-            participant_names.append(p.name)
+            clean_name = p.name.strip()
+            if (
+                clean_name
+                and clean_name not in participant_names
+                and not clean_name.lower().startswith("participant")
+                and not clean_name.lower().startswith("speaker")
+                and clean_name.lower() != "unknown speaker"
+            ):
+                participant_names.append(clean_name)
 
     background_tasks.add_task(
         meeting_pipeline.execute_pipeline,
@@ -675,6 +708,7 @@ def trigger_meeting_processing(
         mode=mode,
         language=language,
         participant_names=participant_names,
+        expected_speakers=expected_speakers,
     )
 
     return {"meeting_id": meeting.id, "status": "queued"}
@@ -689,6 +723,7 @@ async def upload_meeting_recording(
     audio: Optional[UploadFile] = File(None),
     mode: str = "fast",
     language: Optional[str] = None,
+    expected_speakers: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ) -> Any:
@@ -733,11 +768,19 @@ async def upload_meeting_recording(
     meeting.status = "processing"
 
     participant_names = []
-    if meeting.host:
-        participant_names.append(meeting.host.full_name or meeting.host.email)
+    if meeting.host and meeting.host.full_name:
+        participant_names.append(meeting.host.full_name)
     for p in meeting.participants:
         if p.name:
-            participant_names.append(p.name)
+            clean_name = p.name.strip()
+            if (
+                clean_name
+                and clean_name not in participant_names
+                and not clean_name.lower().startswith("participant")
+                and not clean_name.lower().startswith("speaker")
+                and clean_name.lower() != "unknown speaker"
+            ):
+                participant_names.append(clean_name)
 
     db.commit()
     db.refresh(meeting)
@@ -762,6 +805,7 @@ async def upload_meeting_recording(
         mode=mode,
         language=language,
         participant_names=participant_names,
+        expected_speakers=expected_speakers,
     )
 
     return meeting

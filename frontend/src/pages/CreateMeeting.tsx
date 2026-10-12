@@ -25,6 +25,7 @@ export const CreateMeeting: React.FC = () => {
 
   // Audio upload state
   const [audioFile, setAudioFile] = useState<File | null>(null);
+  const [expectedSpeakers, setExpectedSpeakers] = useState<string>('');
   
   // Custom transcript state
   const [transcriptText, setTranscriptText] = useState('');
@@ -61,13 +62,25 @@ export const CreateMeeting: React.FC = () => {
     setIsSubmitting(true);
     setErrorMsg(null);
     try {
-      // Filter out empty participant rows
-      const cleanedParticipants = data.participants.filter(p => p.name.trim() !== '');
+      // Split and clean participant rows (supports comma, semicolon, newline separation)
+      const cleanedParticipants: ParticipantField[] = [];
+      data.participants.forEach((p) => {
+        const subNames = p.name.split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean);
+        subNames.forEach((subName, i) => {
+          cleanedParticipants.push({
+            name: subName,
+            email: i === 0 ? p.email : '',
+          });
+        });
+      });
+
+      const parsedExpected = expectedSpeakers ? parseInt(expectedSpeakers, 10) : undefined;
 
       // 1. Create meeting entry
       const response = await api.post('/meetings/', {
         title: data.title,
-        participants: cleanedParticipants
+        participants: cleanedParticipants,
+        expected_speakers: parsedExpected || (cleanedParticipants.length >= 2 ? cleanedParticipants.length : undefined),
       });
       const meetingId = response.data.id;
 
@@ -86,6 +99,9 @@ export const CreateMeeting: React.FC = () => {
         const formData = new FormData();
         formData.append('file', audioFile);
         formData.append('audio', audioFile);
+        if (parsedExpected && parsedExpected >= 2) {
+          formData.append('expected_speakers', parsedExpected.toString());
+        }
 
         await api.post(`/meetings/${meetingId}/upload-audio`, formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
@@ -331,6 +347,34 @@ export const CreateMeeting: React.FC = () => {
                 </div>
               ))}
             </div>
+            <p className="text-[12px] text-[var(--text-muted)]">
+              Tip: You can add individual rows or enter comma-separated names (e.g. &ldquo;Pawan, Mokshith, Varun&rdquo;).
+            </p>
+          </div>
+
+          {/* Expected speakers input */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="block text-[13px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+                Expected Speakers / Distinct Voices (Optional)
+              </label>
+              <span className="text-[12px] text-[var(--text-muted)]">Hints diarization clustering</span>
+            </div>
+            <select
+              value={expectedSpeakers}
+              onChange={(e) => setExpectedSpeakers(e.target.value)}
+              className="input-enterprise py-2 text-[14px]"
+            >
+              <option value="">Auto-detect (Dynamic discovery based on audio)</option>
+              <option value="2">2 Speakers (Participant 1, Participant 2)</option>
+              <option value="3">3 Speakers (Participant 1, Participant 2, Participant 3)</option>
+              <option value="4">4 Speakers (Participant 1, Participant 2, Participant 3, Participant 4)</option>
+              <option value="5">5 Speakers</option>
+              <option value="6">6 Speakers</option>
+            </select>
+            <p className="text-[12px] text-[var(--text-muted)]">
+              For short recordings with 3+ participants, providing this hint helps AssemblyAI cluster distinct voices accurately.
+            </p>
           </div>
 
           <button

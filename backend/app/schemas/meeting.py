@@ -29,6 +29,7 @@ class MeetingBase(BaseModel):
 
 class MeetingCreate(MeetingBase):
     participants: Optional[List[ParticipantCreate]] = Field(default_factory=list)
+    expected_speakers: Optional[int] = None
 
 
 class MeetingUpdate(BaseModel):
