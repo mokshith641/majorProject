@@ -1,6 +1,8 @@
-from typing import Any, List, Dict
+from typing import Any, List, Dict, Optional
+from datetime import datetime
 import time
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -177,6 +179,84 @@ def get_ai_insights_endpoint(
     return ai_client.generate_analytics_insights(history_payload)
 
 
+class TelemetryUpdateSchema(BaseModel):
+    keyboard_hits: Optional[int] = None
+    mouse_clicks: Optional[int] = None
+    idle_seconds: Optional[int] = None
+    active_window: Optional[str] = None
+
+
+@router.post("/meeting/{id}/telemetry")
+def record_meeting_telemetry(
+    id: int,
+    payload: TelemetryUpdateSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+) -> Any:
+    """Record or update interaction telemetry for a meeting session."""
+    meeting = db.query(Meeting).filter(Meeting.id == id).first()
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    is_admin = getattr(current_user, "role", "") == "admin"
+    if meeting.host_id != current_user.id and not is_admin:
+        is_participant = db.query(Participant).filter(
+            Participant.meeting_id == id, Participant.email == current_user.email
+        ).first()
+        if not is_participant:
+            raise HTTPException(status_code=403, detail="You do not have permission to modify telemetry for this meeting.")
+
+    activity_log = (
+        db.query(ActivityLog)
+        .filter(ActivityLog.meeting_id == id)
+        .order_by(ActivityLog.timestamp.desc())
+        .first()
+    )
+
+    clean_window = payload.active_window.strip() if payload.active_window else None
+    if clean_window and clean_window.lower() in ["idle", "none", "unknown", ""]:
+        clean_window = "Not available"
+
+    if activity_log:
+        if payload.keyboard_hits is not None:
+            activity_log.keyboard_hits = max(activity_log.keyboard_hits or 0, payload.keyboard_hits)
+        if payload.mouse_clicks is not None:
+            activity_log.mouse_clicks = max(activity_log.mouse_clicks or 0, payload.mouse_clicks)
+        if payload.idle_seconds is not None:
+            activity_log.idle_seconds = max(0, payload.idle_seconds)
+        if clean_window:
+            activity_log.active_window = clean_window
+        elif not activity_log.active_window or activity_log.active_window.strip().lower() in ["idle", "none", "unknown", ""]:
+            activity_log.active_window = "Not available"
+        activity_log.timestamp = datetime.utcnow()
+    else:
+        activity_log = ActivityLog(
+            meeting_id=meeting.id,
+            user_id=current_user.id,
+            keyboard_hits=payload.keyboard_hits or 0,
+            mouse_clicks=payload.mouse_clicks or 0,
+            idle_seconds=payload.idle_seconds if payload.idle_seconds is not None else 0,
+            active_window=clean_window or "Not available",
+            focus_score=85.0,
+            eye_attention_score=85.0,
+            face_present_seconds=0.0,
+            timestamp=datetime.utcnow(),
+        )
+        db.add(activity_log)
+
+    db.commit()
+    db.refresh(activity_log)
+
+    return {
+        "status": "success",
+        "keyboard_hits": activity_log.keyboard_hits,
+        "mouse_clicks": activity_log.mouse_clicks,
+        "idle_seconds": activity_log.idle_seconds,
+        "active_window": activity_log.active_window,
+        "focus_score": activity_log.focus_score,
+    }
+
+
 @router.get("/meeting/{id}")
 def get_meeting_analytics(
     id: int,
@@ -256,15 +336,30 @@ def get_meeting_analytics(
 
     participant_stats.sort(key=lambda x: x["total_speaking_seconds"], reverse=True)
 
+    has_telemetry = activity_log is not None
+
+    dominant_window = None
+    if activity_log and activity_log.active_window:
+        w = activity_log.active_window.strip()
+        if w.lower() in ["idle", "none", "unknown", ""]:
+            dominant_window = "Not available"
+        else:
+            dominant_window = w
+    elif activity_log:
+        dominant_window = "Not available"
+    else:
+        dominant_window = None
+
     return {
-        "available": True,
-        "focus_score": round(activity_log.focus_score if activity_log else 85.0, 1),
-        "eye_attention_score": round(activity_log.eye_attention_score if activity_log else 85.0, 1),
-        "keyboard_hits": activity_log.keyboard_hits if activity_log else 0,
-        "mouse_clicks": activity_log.mouse_clicks if activity_log else 0,
-        "idle_seconds": activity_log.idle_seconds if activity_log else 0,
-        "active_window": activity_log.active_window if activity_log else "Meeting Room",
-        "face_present_seconds": round(activity_log.face_present_seconds if activity_log else 0.0, 1),
+        "available": True if (has_telemetry or segments) else False,
+        "has_telemetry": has_telemetry,
+        "focus_score": round(activity_log.focus_score, 1) if (activity_log and activity_log.focus_score is not None) else None,
+        "eye_attention_score": round(activity_log.eye_attention_score, 1) if (activity_log and activity_log.eye_attention_score is not None) else None,
+        "keyboard_hits": activity_log.keyboard_hits if has_telemetry else None,
+        "mouse_clicks": activity_log.mouse_clicks if has_telemetry else None,
+        "idle_seconds": activity_log.idle_seconds if has_telemetry else None,
+        "active_window": dominant_window,
+        "face_present_seconds": round(activity_log.face_present_seconds, 1) if (activity_log and activity_log.face_present_seconds is not None) else None,
         "total_spoken_seconds": round(total_spoken_time, 2),
         "participant_stats": participant_stats,
     }
