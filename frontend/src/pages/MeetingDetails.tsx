@@ -102,6 +102,7 @@ interface ParticipantStat {
 
 interface AnalyticsData {
   available: boolean;
+  has_telemetry?: boolean;
   keyboard_hits?: number | null;
   mouse_clicks?: number | null;
   idle_seconds?: number | null;
@@ -150,6 +151,93 @@ export const MeetingDetails: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showDebugPanel, setShowDebugPanel] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Interaction telemetry refs for active session (preserved across tab switching)
+  const sessionKeysRef = React.useRef<number>(0);
+  const sessionClicksRef = React.useRef<number>(0);
+  const lastActivityRef = React.useRef<number>(Date.now());
+  const [liveIdleSeconds, setLiveIdleSeconds] = useState<number>(0);
+  const [, setInteractionTick] = useState<number>(0);
+
+  // Register listeners once for the session, preventing duplicate listeners and ignoring password inputs
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'password') {
+        return;
+      }
+      sessionKeysRef.current += 1;
+      lastActivityRef.current = Date.now();
+      setInteractionTick((prev) => prev + 1);
+    };
+
+    const handleClick = () => {
+      sessionClicksRef.current += 1;
+      lastActivityRef.current = Date.now();
+      setInteractionTick((prev) => prev + 1);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('click', handleClick);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('click', handleClick);
+    };
+  }, [id]);
+
+  // Live idle time calculation from actual activity timestamps
+  useEffect(() => {
+    const updateIdle = () => {
+      const idleSec = Math.max(0, Math.floor((Date.now() - lastActivityRef.current) / 1000));
+      setLiveIdleSeconds(idleSec);
+    };
+    updateIdle();
+    const interval = setInterval(updateIdle, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Sync collected session telemetry to backend persistence
+  const syncTelemetryToBackend = async () => {
+    if (!id) return;
+    const idleSec = Math.max(0, Math.floor((Date.now() - lastActivityRef.current) / 1000));
+    const totalKeys = (analytics?.keyboard_hits ?? 0) + sessionKeysRef.current;
+    const totalClicks = (analytics?.mouse_clicks ?? 0) + sessionClicksRef.current;
+
+    try {
+      const res = await api.post(`/analytics/meeting/${id}/telemetry`, {
+        keyboard_hits: totalKeys,
+        mouse_clicks: totalClicks,
+        idle_seconds: idleSec,
+        active_window: document.title || 'Meet Assistant',
+      });
+      if (res.data) {
+        sessionKeysRef.current = 0;
+        sessionClicksRef.current = 0;
+        setAnalytics((prev) =>
+          prev
+            ? {
+                ...prev,
+                has_telemetry: true,
+                keyboard_hits: res.data.keyboard_hits,
+                mouse_clicks: res.data.mouse_clicks,
+                idle_seconds: res.data.idle_seconds,
+                active_window: res.data.active_window,
+              }
+            : null
+        );
+      }
+    } catch (err) {
+      console.warn('Failed to sync telemetry to backend:', err);
+    }
+  };
+
+  const handleTabChange = (tab: 'summary' | 'transcript' | 'engagement') => {
+    setActiveTab(tab);
+    if (tab === 'engagement') {
+      syncTelemetryToBackend();
+    }
+  };
 
   useEffect(() => {
     const fetchMeeting = async () => {
@@ -604,7 +692,7 @@ export const MeetingDetails: React.FC = () => {
       {/* Navigation tabs */}
       <div className="flex border-b border-[var(--border-subtle)] gap-2">
         <button
-          onClick={() => setActiveTab('summary')}
+          onClick={() => handleTabChange('summary')}
           className={`px-5 py-3 text-[14px] sm:text-[15px] font-semibold border-b-2 transition-all flex items-center gap-2 cursor-pointer ${
             activeTab === 'summary'
               ? 'border-[var(--color-brand)] text-[var(--color-brand)]'
@@ -615,7 +703,7 @@ export const MeetingDetails: React.FC = () => {
           AI Summary & Action Items
         </button>
         <button
-          onClick={() => setActiveTab('transcript')}
+          onClick={() => handleTabChange('transcript')}
           className={`px-5 py-3 text-[14px] sm:text-[15px] font-semibold border-b-2 transition-all flex items-center gap-2 cursor-pointer ${
             activeTab === 'transcript'
               ? 'border-[var(--color-brand)] text-[var(--color-brand)]'
@@ -626,7 +714,7 @@ export const MeetingDetails: React.FC = () => {
           Full Transcript ({rawSegmentsList.length})
         </button>
         <button
-          onClick={() => setActiveTab('engagement')}
+          onClick={() => handleTabChange('engagement')}
           className={`px-5 py-3 text-[14px] sm:text-[15px] font-semibold border-b-2 transition-all flex items-center gap-2 cursor-pointer ${
             activeTab === 'engagement'
               ? 'border-[var(--color-brand)] text-[var(--color-brand)]'
@@ -848,69 +936,74 @@ export const MeetingDetails: React.FC = () => {
               </div>
             ) : (
               <div className="space-y-6">
-                {/* Top Metrics Row: Focus Score & Desktop Activity (if telemetry recorded) */}
-                {(analytics.focus_score != null || analytics.keyboard_hits != null) && (
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    {/* Visual Gauge */}
-                    {analytics.focus_score != null && (
-                      <div className="card-enterprise p-6 sm:p-7 space-y-6 flex flex-col justify-center">
-                        <h2 className="text-[19px] sm:text-[21px] font-semibold text-[var(--text-primary)] text-center tracking-tight">
-                          Session Focus Score
-                        </h2>
-                        <div className="relative h-40 w-40 mx-auto flex items-center justify-center rounded-full border-4 border-dashed border-[var(--border-subtle)]">
-                          <div className="absolute inset-2 rounded-full bg-[var(--bg-elevated)] flex flex-col items-center justify-center shadow-xs">
-                            <span className="text-[34px] font-semibold text-[var(--text-primary)]">
-                              {Math.round(analytics.focus_score ?? 0)}%
-                            </span>
-                            <span className="text-[12px] text-[var(--text-muted)] uppercase tracking-wider mt-1 font-medium">
-                              Indexed
-                            </span>
-                          </div>
+                {/* Top Metrics Row: Focus Score & Desktop Activity */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  {/* Visual Gauge */}
+                  {analytics.focus_score != null && (
+                    <div className="card-enterprise p-6 sm:p-7 space-y-6 flex flex-col justify-center">
+                      <h2 className="text-[19px] sm:text-[21px] font-semibold text-[var(--text-primary)] text-center tracking-tight">
+                        Session Focus Score
+                      </h2>
+                      <div className="relative h-40 w-40 mx-auto flex items-center justify-center rounded-full border-4 border-dashed border-[var(--border-subtle)]">
+                        <div className="absolute inset-2 rounded-full bg-[var(--bg-elevated)] flex flex-col items-center justify-center shadow-xs">
+                          <span className="text-[34px] font-semibold text-[var(--text-primary)]">
+                            {Math.round(analytics.focus_score ?? 0)}%
+                          </span>
+                          <span className="text-[12px] text-[var(--text-muted)] uppercase tracking-wider mt-1 font-medium">
+                            Indexed
+                          </span>
                         </div>
-                        <p className="text-[14px] text-[var(--text-secondary)] text-center leading-relaxed">
-                          Calculated dynamically from gaze direction and desktop activity telemetry.
+                      </div>
+                      <p className="text-[14px] text-[var(--text-secondary)] text-center leading-relaxed">
+                        Calculated dynamically from gaze direction and desktop activity telemetry.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Desktop Interaction details */}
+                  <div className={`card-enterprise p-6 sm:p-7 ${analytics.focus_score != null ? 'lg:col-span-2' : 'lg:col-span-3'} space-y-6`}>
+                    <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
+                      <h2 className="text-[19px] sm:text-[21px] font-semibold text-[var(--text-primary)] tracking-tight">
+                        Interactive Telemetry Log
+                      </h2>
+                      {!(analytics.has_telemetry || analytics.keyboard_hits != null || sessionKeysRef.current > 0 || sessionClicksRef.current > 0) && (
+                        <span className="text-[12px] text-[var(--text-muted)] italic">
+                          Session monitoring active
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="bg-[var(--bg-card-secondary)] border border-[var(--border-subtle)] p-4 sm:p-5 rounded-xl text-center">
+                        <p className="text-[var(--text-muted)] text-[12px] font-semibold uppercase tracking-wider">Keystrokes</p>
+                        <p className="text-[26px] sm:text-[28px] font-semibold text-[var(--text-primary)] mt-1">
+                          {(analytics.keyboard_hits ?? 0) + sessionKeysRef.current}
                         </p>
                       </div>
-                    )}
-
-                    {/* Desktop Interaction details */}
-                    {analytics.keyboard_hits != null && (
-                      <div className={`card-enterprise p-6 sm:p-7 ${analytics.focus_score != null ? 'lg:col-span-2' : 'lg:col-span-3'} space-y-6`}>
-                        <h2 className="text-[19px] sm:text-[21px] font-semibold text-[var(--text-primary)] tracking-tight">
-                          Interactive Telemetry Log
-                        </h2>
-
-                        <div className="grid grid-cols-3 gap-4">
-                          <div className="bg-[var(--bg-card-secondary)] border border-[var(--border-subtle)] p-4 sm:p-5 rounded-xl text-center">
-                            <p className="text-[var(--text-muted)] text-[12px] font-semibold uppercase tracking-wider">Keystrokes</p>
-                            <p className="text-[26px] sm:text-[28px] font-semibold text-[var(--text-primary)] mt-1">
-                              {analytics.keyboard_hits ?? 0}
-                            </p>
-                          </div>
-                          <div className="bg-[var(--bg-card-secondary)] border border-[var(--border-subtle)] p-4 sm:p-5 rounded-xl text-center">
-                            <p className="text-[var(--text-muted)] text-[12px] font-semibold uppercase tracking-wider">Clicks</p>
-                            <p className="text-[26px] sm:text-[28px] font-semibold text-[var(--text-primary)] mt-1">
-                              {analytics.mouse_clicks ?? 0}
-                            </p>
-                          </div>
-                          <div className="bg-[var(--bg-card-secondary)] border border-[var(--border-subtle)] p-4 sm:p-5 rounded-xl text-center">
-                            <p className="text-[var(--text-muted)] text-[12px] font-semibold uppercase tracking-wider">Idle Time</p>
-                            <p className="text-[26px] sm:text-[28px] font-semibold text-[var(--text-primary)] mt-1">
-                              {analytics.idle_seconds ?? 0}s
-                            </p>
-                          </div>
-                        </div>
-
-                        {analytics.active_window && (
-                          <div className="bg-[var(--bg-card-secondary)] p-4 sm:p-5 rounded-xl border border-[var(--border-subtle)] flex items-center justify-between text-[14px] sm:text-[15px]">
-                            <span className="text-[var(--text-secondary)]">Dominant Application Focused:</span>
-                            <strong className="text-[var(--text-primary)] font-semibold">{analytics.active_window}</strong>
-                          </div>
-                        )}
+                      <div className="bg-[var(--bg-card-secondary)] border border-[var(--border-subtle)] p-4 sm:p-5 rounded-xl text-center">
+                        <p className="text-[var(--text-muted)] text-[12px] font-semibold uppercase tracking-wider">Clicks</p>
+                        <p className="text-[26px] sm:text-[28px] font-semibold text-[var(--text-primary)] mt-1">
+                          {(analytics.mouse_clicks ?? 0) + sessionClicksRef.current}
+                        </p>
                       </div>
-                    )}
+                      <div className="bg-[var(--bg-card-secondary)] border border-[var(--border-subtle)] p-4 sm:p-5 rounded-xl text-center">
+                        <p className="text-[var(--text-muted)] text-[12px] font-semibold uppercase tracking-wider">Idle Time</p>
+                        <p className="text-[26px] sm:text-[28px] font-semibold text-[var(--text-primary)] mt-1">
+                          {liveIdleSeconds}s
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="bg-[var(--bg-card-secondary)] p-4 sm:p-5 rounded-xl border border-[var(--border-subtle)] flex items-center justify-between text-[14px] sm:text-[15px]">
+                      <span className="text-[var(--text-secondary)]">Dominant Application Focused:</span>
+                      <strong className="text-[var(--text-primary)] font-semibold">
+                        {(!analytics.active_window || analytics.active_window.trim().toLowerCase() === 'idle')
+                          ? 'Not available'
+                          : analytics.active_window}
+                      </strong>
+                    </div>
                   </div>
-                )}
+                </div>
 
                 {/* Participant Speaking Distribution & Statistics */}
                 {analytics.participant_stats && analytics.participant_stats.length > 0 && (

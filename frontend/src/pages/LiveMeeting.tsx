@@ -297,7 +297,13 @@ export const LiveMeeting: React.FC = () => {
   useEffect(() => {
     const timer = setInterval(() => setSecondsElapsed((p) => p + 1), 1000);
     const handleClick = () => setLocalClicks((p) => p + 1);
-    const handleKeyPress = () => setLocalKeys((p) => p + 1);
+    const handleKeyPress = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'password') {
+        return;
+      }
+      setLocalKeys((p) => p + 1);
+    };
 
     window.addEventListener('click', handleClick);
     window.addEventListener('keydown', handleKeyPress);
@@ -713,7 +719,11 @@ export const LiveMeeting: React.FC = () => {
       if (recognitionRef.current) {
         try { recognitionRef.current.stop(); } catch (e) {}
       }
-      await api.post(`/meetings/${id}/end`);
+      await api.post(`/meetings/${id}/end`, {
+        keyboard_hits: localKeys,
+        mouse_clicks: localClicks,
+        active_window: document.title || 'Meet Assistant - Live Meeting',
+      });
       if (mediaStreamRef.current) {
         mediaStreamRef.current.getTracks().forEach((track) => track.stop());
       }
