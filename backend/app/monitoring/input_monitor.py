@@ -123,7 +123,7 @@ class UserActivityTracker:
             self._tracker_thread.join(timeout=3.0)
 
         # Get dominant focused window
-        dominant_window = "Idle"
+        dominant_window = "Not available"
         if self.active_window_log:
             dominant_window = max(self.active_window_log, key=self.active_window_log.get)
 

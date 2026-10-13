@@ -3,7 +3,7 @@ import logging
 import os
 import time
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Dict
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 
@@ -417,6 +417,7 @@ def _process_meeting_background(
 def end_meeting(
     id: int,
     background_tasks: BackgroundTasks,
+    payload: Optional[Dict[str, Any]] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ) -> Any:
@@ -435,6 +436,23 @@ def end_meeting(
 
     input_data = activity_tracker.stop_tracking()
     face_seconds, avg_gaze = vision_monitor.stop()
+
+    # Merge incoming telemetry if provided by the client
+    if payload:
+        f_keys = payload.get("keyboard_hits") or 0
+        f_clicks = payload.get("mouse_clicks") or 0
+        input_data["keyboard_hits"] = max(input_data.get("keyboard_hits", 0), f_keys)
+        input_data["mouse_clicks"] = max(input_data.get("mouse_clicks", 0), f_clicks)
+        f_win = payload.get("active_window")
+        if f_win and f_win.strip().lower() not in ["idle", "none", "unknown", ""]:
+            input_data["dominant_window"] = f_win.strip()
+        if payload.get("idle_seconds") is not None:
+            input_data["idle_seconds"] = max(0, payload["idle_seconds"])
+
+    # Ensure dominant window does not incorrectly display "Idle"
+    dom_win = input_data.get("dominant_window")
+    if not dom_win or dom_win.strip().lower() in ["idle", "none", "unknown", ""]:
+        input_data["dominant_window"] = "Not available"
 
     start_time = meeting_start_times.pop(meeting.id, meeting.date)
     duration = int((datetime.utcnow() - start_time).total_seconds())
