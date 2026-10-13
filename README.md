@@ -13,6 +13,20 @@ An intelligent enterprise-style SaaS application designed to record meetings, ge
 - **Computer Vision**: OpenCV + MediaPipe FaceMesh (Gaze direction classification)
 - **Desktop Telemetry**: pynput (key strokes/clicks count) + pygetwindow (active focused application)
 - **Document Generator**: ReportLab (PDF compiler)
+- **Deployment**: Docker Compose (PostgreSQL, FastAPI, Nginx React SPA) | [Production Deployment Guide](DEPLOYMENT.md)
+
+---
+
+## 🚀 Production Deployment (Docker Compose)
+
+To spin up the complete production stack (PostgreSQL + FastAPI + Nginx React Frontend):
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+```
+
+For complete instructions covering SSL/HTTPS, Cloud PaaS (Render/Railway/Vercel), and database backups, see [**DEPLOYMENT.md**](DEPLOYMENT.md).
 
 ---
 

@@ -1,29 +1,96 @@
 version: '3.8'
 
 services:
-  # Database Service
+  # PostgreSQL Database Service
   db:
     image: postgres:15-alpine
     container_name: meeting_assistant_db
-    restart: always
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgrespassword
-      POSTGRES_DB: meeting_assistant
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgrespassword}
+      POSTGRES_DB: ${POSTGRES_DB:-meeting_assistant}
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-meeting_assistant}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
-  # Database UI client for visual inspection
+  # FastAPI Backend Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: meeting_assistant_backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgrespassword}@db:5432/${POSTGRES_DB:-meeting_assistant}
+      - DEBUG=${DEBUG:-False}
+      - SECRET_KEY=${SECRET_KEY:-meet-assistant-production-secret-key-replace-me}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - ASSEMBLYAI_API_KEY=${ASSEMBLYAI_API_KEY}
+      - GROQ_TRANSCRIPTION_MODEL=${GROQ_TRANSCRIPTION_MODEL:-whisper-large-v3-turbo}
+      - TRANSCRIPTION_LANGUAGE=${TRANSCRIPTION_LANGUAGE:-auto}
+      - ENABLE_TRANSCRIPT_CLEANUP=${ENABLE_TRANSCRIPT_CLEANUP:-True}
+      - UPLOAD_DIR=/app/data/recordings
+      - REPORTS_DIR=/app/data/reports
+    volumes:
+      - recordings_data:/app/data/recordings
+      - reports_data:/app/data/reports
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # React Frontend Service (Served via Nginx Reverse Proxy)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: meeting_assistant_frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${PORT:-80}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Optional Adminer UI for DB administration (accessible at :8080)
   adminer:
     image: adminer:latest
     container_name: meeting_assistant_adminer
-    restart: always
+    restart: unless-stopped
     ports:
       - "8080:8080"
     depends_on:
       - db
+    profiles:
+      - tools
 
 volumes:
   pgdata:
+    driver: local
+  recordings_data:
+    driver: local
+  reports_data:
+    driver: local

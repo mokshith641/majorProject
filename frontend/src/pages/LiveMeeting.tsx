@@ -321,7 +321,11 @@ export const LiveMeeting: React.FC = () => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     // Pass JWT token as query param so backend can authenticate & assign identity+color
     const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
-    const wsUrl = `${protocol}//${window.location.hostname}:8000/api/v1/meetings/${id}/ws${tokenParam}`;
+    const defaultHost = import.meta.env.DEV
+      ? `${window.location.hostname}:8000`
+      : (window.location.host || `${window.location.hostname}:8000`);
+    const wsBase = import.meta.env.VITE_WS_URL || `${protocol}//${defaultHost}`;
+    const wsUrl = `${wsBase}/api/v1/meetings/${id}/ws${tokenParam}`;
 
     let ws: WebSocket;
     let retries = 0;

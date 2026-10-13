@@ -1,0 +1,49 @@
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Database & runtime files
+*.db
+*.sqlite3
+sql_app.db
+data/recordings/*
+data/reports/*
+!data/recordings/.gitkeep
+!data/reports/.gitkeep
+
+# Environment & local credentials
+.env
+.env.local
+
+# Testing & linting
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# OS / IDE files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

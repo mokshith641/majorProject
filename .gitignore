@@ -26,7 +26,10 @@ __pycache__/
 # Local databases and runtime data
 *.db
 *.sqlite3
-backend/data/
+backend/data/recordings/*
+!backend/data/recordings/.gitkeep
+backend/data/reports/*
+!backend/data/reports/.gitkeep
 backend/whisper_models/
 backend/recordings/
 backend/reports/

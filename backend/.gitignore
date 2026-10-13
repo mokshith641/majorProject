@@ -43,6 +43,10 @@ ENV/
 # Local storage and recordings
 /app/static/
 /app/data/
+data/recordings/*
+!data/recordings/.gitkeep
+data/reports/*
+!data/reports/.gitkeep
 /recordings/
 /reports/
 /whisper_models/
