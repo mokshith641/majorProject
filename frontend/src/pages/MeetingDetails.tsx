@@ -23,7 +23,8 @@ import {
   Activity,
   Layers,
   Sparkles,
-  Volume2
+  Volume2,
+  MicOff
 } from 'lucide-react';
 
 interface Participant {
@@ -739,14 +740,16 @@ export const MeetingDetails: React.FC = () => {
                   <h2 className="text-[19px] sm:text-[21px] font-semibold text-[var(--text-primary)] tracking-tight">Executive Summary</h2>
                 </div>
                 <p className="text-[15px] sm:text-[16px] leading-[1.65] text-[var(--text-secondary)] whitespace-pre-line font-normal">
-                  {meeting.summary.key_points}
+                  {meeting.summary.key_points && meeting.summary.key_points !== 'No speech recorded.'
+                    ? meeting.summary.key_points
+                    : 'No speech detected. Please record again.'}
                 </p>
               </div>
 
               <div className="card-enterprise p-6 sm:p-7 space-y-3.5">
                 <h2 className="text-[19px] sm:text-[21px] font-semibold text-[var(--text-primary)] tracking-tight">Core Decisions</h2>
                 <p className="text-[15px] sm:text-[16px] leading-[1.65] text-[var(--text-secondary)] whitespace-pre-line font-normal">
-                  {meeting.summary.decisions}
+                  {meeting.summary.decisions?.trim() ? meeting.summary.decisions : 'No formal decisions captured.'}
                 </p>
               </div>
 
@@ -843,9 +846,17 @@ export const MeetingDetails: React.FC = () => {
                   No transcript generated yet. If the meeting was recently recorded, AI processing is underway.
                 </p>
               ) : rawSegmentsList.length === 0 ? (
-                <div className="bg-[var(--bg-card-secondary)] p-5 rounded-xl border border-[var(--border-subtle)]">
-                  <p className="text-[var(--text-primary)] text-[16px] leading-[1.65]">
-                    {meeting.transcript.full_text || 'No speech recorded.'}
+                <div className="bg-[var(--bg-card-secondary)] p-8 rounded-xl border border-[var(--border-subtle)] text-center py-12 space-y-3">
+                  <div className="w-12 h-12 rounded-full bg-[var(--bg-surface)] border border-[var(--border-subtle)] flex items-center justify-center mx-auto text-[var(--text-secondary)]">
+                    <MicOff className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-[17px] font-semibold text-[var(--text-primary)]">
+                    {meeting.transcript.full_text && meeting.transcript.full_text !== 'No speech recorded.'
+                      ? meeting.transcript.full_text
+                      : 'No speech detected. Please record again.'}
+                  </h3>
+                  <p className="text-[14px] text-[var(--text-secondary)] max-w-md mx-auto">
+                    No audible speech was detected during this recording session. Ensure your microphone is connected and active before starting a meeting.
                   </p>
                 </div>
               ) : filteredSegments.length === 0 ? (
