@@ -8,7 +8,6 @@ import {
   MicOff,
   Video,
   VideoOff,
-  Subtitles,
   Hand,
   ScreenShare,
   MoreVertical,
@@ -33,15 +32,6 @@ import {
   Sun,
   Moon
 } from 'lucide-react';
-
-interface LiveCaptionEvent {
-  speaker: string;
-  text: string;
-  isInterim: boolean;
-  timestamp?: string;
-  color?: string;
-  user_id?: number;
-}
 
 interface ChatMessage {
   id: string;
@@ -78,18 +68,11 @@ export const LiveMeeting: React.FC = () => {
   // Google Meet Core Action Controls
   const [isMicMuted, setIsMicMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
-  const [captionsEnabled, setCaptionsEnabled] = useState(true);
   const [isHandRaised, setIsHandRaised] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [activeSidebar, setActiveSidebar] = useState<'none' | 'chat' | 'people' | 'details' | 'telemetry'>('none');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
-
-  // Subtitles / Live Captions state
-  const [activeCaption, setActiveCaption] = useState<LiveCaptionEvent | null>(null);
-  const [isHearingSpeech, setIsHearingSpeech] = useState(false);
-  const [speechApiSupported, setSpeechApiSupported] = useState(true);
-  const [captionSize, setCaptionSize] = useState<'normal' | 'large'>('normal');
 
   // Multi-user: live participants in the meeting room
   const [liveParticipants, setLiveParticipants] = useState<LiveParticipant[]>([]);
@@ -102,7 +85,7 @@ export const LiveMeeting: React.FC = () => {
     {
       id: 'msg-1',
       speaker: 'System',
-      text: 'Meeting session connected. Closed Captions (CC) and telemetry are active.',
+      text: 'Meeting session connected. Audio recording and telemetry are active.',
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       isSystem: true
     }
@@ -120,9 +103,7 @@ export const LiveMeeting: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
-  const recognitionRef = useRef<any>(null);
   const wsRef = useRef<WebSocket | null>(null);
-  const captionClearTimeoutRef = useRef<any>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -413,33 +394,19 @@ export const LiveMeeting: React.FC = () => {
               ]);
             }
 
-            // ── Live caption from any participant ──
-            else if (data.type === 'caption') {
-              setActiveCaption({
-                speaker: data.speaker,
-                text: data.text,
-                isInterim: !data.is_final,
-                timestamp: data.timestamp,
-                color: data.color,
-                user_id: data.user_id,
-              });
-
-              if (data.is_final && data.text?.trim()) {
+            // ── In-call chat message from another participant ──
+            else if (data.type === 'chat_message') {
+              if (data.user_id !== myUserId) {
                 setChatMessages((prev) => [
                   ...prev,
                   {
-                    id: `cap-${Date.now()}-${Math.random()}`,
+                    id: `chat-${Date.now()}-${Math.random()}`,
                     speaker: data.speaker,
-                    text: data.text.trim(),
+                    text: data.text,
                     time: data.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                     color: data.color,
                   }
                 ]);
-
-                if (captionClearTimeoutRef.current) clearTimeout(captionClearTimeoutRef.current);
-                captionClearTimeoutRef.current = setTimeout(() => {
-                  setActiveCaption((curr) => (curr?.text === data.text ? null : curr));
-                }, 4500);
               }
             }
 
@@ -486,191 +453,6 @@ export const LiveMeeting: React.FC = () => {
     };
   }, [id, token]);
 
-  // 6. Web Speech API live microphone speech recognition
-  useEffect(() => {
-    if (isMicMuted) {
-      setIsHearingSpeech(false);
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch (e) {}
-      }
-      return;
-    }
-
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setSpeechApiSupported(false);
-      return;
-    }
-
-    let recognition: any;
-    let isExplicitlyClosed = false;
-
-    try {
-      recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = 'en-US';
-      recognitionRef.current = recognition;
-
-      recognition.onstart = () => {
-        setIsHearingSpeech(true);
-      };
-
-      recognition.onresult = (event: any) => {
-        let interimText = '';
-        let finalText = '';
-
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          const piece = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            finalText += piece;
-          } else {
-            interimText += piece;
-          }
-        }
-
-        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-
-        if (interimText.trim()) {
-          setActiveCaption({
-            speaker: `${currentSpeakerName} (You)`,
-            text: interimText.trim(),
-            isInterim: true,
-            timestamp: timeStr,
-            color: myColor,
-          });
-
-          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({
-              type: 'caption',
-              text: interimText.trim(),
-              is_final: false,
-              timestamp: timeStr
-            }));
-          }
-        }
-
-        if (finalText.trim()) {
-          const cleanFinal = finalText.trim();
-          setActiveCaption({
-            speaker: `${currentSpeakerName} (You)`,
-            text: cleanFinal,
-            isInterim: false,
-            timestamp: timeStr,
-            color: myColor,
-          });
-
-          setChatMessages((prev) => [
-            ...prev,
-            {
-              id: `cap-${Date.now()}-${Math.random()}`,
-              speaker: `${currentSpeakerName} (You)`,
-              text: cleanFinal,
-              time: timeStr,
-              color: myColor,
-            }
-          ]);
-
-          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({
-              type: 'caption',
-              text: cleanFinal,
-              is_final: true,
-              timestamp: timeStr
-            }));
-          }
-
-          if (captionClearTimeoutRef.current) clearTimeout(captionClearTimeoutRef.current);
-          captionClearTimeoutRef.current = setTimeout(() => {
-            setActiveCaption((curr) => (curr?.text === cleanFinal ? null : curr));
-          }, 4500);
-        }
-      };
-
-      recognition.onerror = (event: any) => {
-        console.warn("Speech recognition notice:", event.error);
-        if (event.error === 'not-allowed') {
-          setIsHearingSpeech(false);
-          setSpeechApiSupported(false);
-        }
-      };
-
-      recognition.onend = () => {
-        if (!isExplicitlyClosed && !isMicMuted && captionsEnabled) {
-          try {
-            recognition.start();
-          } catch (e) {}
-        }
-      };
-
-      if (captionsEnabled && !isMicMuted) {
-        recognition.start();
-      }
-    } catch (e) {
-      console.warn("Could not initiate SpeechRecognition:", e);
-      setSpeechApiSupported(false);
-    }
-
-    return () => {
-      isExplicitlyClosed = true;
-      if (recognition) {
-        try {
-          recognition.stop();
-        } catch (e) {}
-      }
-    };
-  }, [captionsEnabled, isMicMuted, currentSpeakerName, myColor]);
-
-  // 7. Fallback dialogue if microphone speech is blocked
-  useEffect(() => {
-    if (speechApiSupported && isHearingSpeech) return;
-    if (isMicMuted) return;
-
-    const fallbackDialogue = [
-      { speaker: "Daniel", text: "Welcome to the session everyone. Let's sync on current milestones." },
-      { speaker: "Priya", text: "I have completed testing on the authentication and session handlers." },
-      { speaker: "Mokshith", text: "Database connection pooling is configured and optimized." },
-      { speaker: "Daniel", text: "Live captions and attendance telemetry look completely stable." },
-      { speaker: "Priya", text: "We are ready to wrap up and compile the final meeting reports." }
-    ];
-
-    const intervals = [6, 18, 35, 52, 70];
-    const timers = intervals.map((time, idx) => {
-      return setTimeout(() => {
-        const item = fallbackDialogue[idx];
-        const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-        if (captionsEnabled) {
-          setActiveCaption({
-            speaker: item.speaker,
-            text: item.text,
-            isInterim: false,
-            timestamp: timeNow
-          });
-
-          if (captionClearTimeoutRef.current) clearTimeout(captionClearTimeoutRef.current);
-          captionClearTimeoutRef.current = setTimeout(() => {
-            setActiveCaption((curr) => (curr?.text === item.text ? null : curr));
-          }, 4500);
-        }
-
-        setChatMessages((prev) => [
-          ...prev,
-          {
-            id: `diag-${idx}`,
-            speaker: item.speaker,
-            text: item.text,
-            time: timeNow
-          }
-        ]);
-      }, time * 1000);
-    });
-
-    return () => timers.forEach(clearTimeout);
-  }, [speechApiSupported, isHearingSpeech, captionsEnabled, isMicMuted]);
-
   // Auto-scroll chat / transcript sidebar
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -694,9 +476,8 @@ export const LiveMeeting: React.FC = () => {
     // Send through WebSocket — server will attach correct identity+color
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
-        type: 'caption',
+        type: 'chat_message',
         text: chatInput.trim(),
-        is_final: true,
         timestamp: timeStr
       }));
     }
@@ -720,9 +501,6 @@ export const LiveMeeting: React.FC = () => {
     setIsEnding(true);
     setEndStep('Stopping recording devices…');
     try {
-      if (recognitionRef.current) {
-        try { recognitionRef.current.stop(); } catch (e) {}
-      }
       await api.post(`/meetings/${id}/end`, {
         keyboard_hits: localKeys,
         mouse_clicks: localClicks,
@@ -893,11 +671,6 @@ export const LiveMeeting: React.FC = () => {
               </div>
             )}
 
-            {/* Speaking Active Glow Ring Indicator */}
-            {isHearingSpeech && !isMicMuted && (
-              <div className="absolute inset-0 rounded-2xl border-3 border-[#8ab4f8] pointer-events-none transition-all duration-200 shadow-[inset_0_0_20px_rgba(138,180,248,0.3)]"></div>
-            )}
-
             {/* Google Meet Participant Bottom-Left Name Badge */}
             <div className="absolute bottom-4 left-4 z-20 flex items-center gap-2 bg-[#202124]/85 backdrop-blur-md px-3.5 py-1.5 rounded-lg border border-white/10 shadow-lg">
               <span className="text-xs font-medium text-white tracking-wide">
@@ -906,12 +679,7 @@ export const LiveMeeting: React.FC = () => {
               {isMicMuted ? (
                 <MicOff className="h-3.5 w-3.5 text-red-400" />
               ) : (
-                <div className="flex items-center gap-0.5">
-                  <Mic className={`h-3.5 w-3.5 ${isHearingSpeech ? 'text-[#8ab4f8]' : 'text-slate-400'}`} />
-                  {isHearingSpeech && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#8ab4f8] animate-ping"></span>
-                  )}
-                </div>
+                <Mic className="h-3.5 w-3.5 text-[#8ab4f8]" />
               )}
             </div>
 
@@ -935,28 +703,6 @@ export const LiveMeeting: React.FC = () => {
                 </button>
               </div>
             </div>
-
-            {/* Google Meet Native-Style Closed Captions (CC) Overlay */}
-            {captionsEnabled && activeCaption && (
-              <div className="absolute bottom-16 left-6 right-6 z-30 flex justify-center pointer-events-none animate-fadeIn">
-                <div className="bg-[#202124]/90 backdrop-blur-md border border-white/15 px-5 py-3 rounded-xl shadow-2xl max-w-2xl text-center space-y-1">
-                  <div className="flex items-center justify-center gap-2">
-                    <span
-                      className="text-[11px] font-bold uppercase tracking-wider"
-                      style={{ color: activeCaption.color || '#8ab4f8' }}
-                    >
-                      {activeCaption.speaker}
-                    </span>
-                    {activeCaption.isInterim && (
-                      <span className="text-[10px] text-slate-400 italic">...</span>
-                    )}
-                  </div>
-                  <p className={`${captionSize === 'large' ? 'text-lg' : 'text-sm'} text-white font-medium leading-snug tracking-wide`}>
-                    "{activeCaption.text}"
-                  </p>
-                </div>
-              </div>
-            )}
           </div>
         </div>
 
@@ -966,7 +712,7 @@ export const LiveMeeting: React.FC = () => {
             {/* Drawer Header */}
             <div className="p-4 border-b border-[#3c4043] flex items-center justify-between">
               <h3 className="text-sm font-semibold text-white">
-                {activeSidebar === 'chat' && 'In-call messages & Transcript'}
+                {activeSidebar === 'chat' && 'In-call messages'}
                 {activeSidebar === 'people' && 'People'}
                 {activeSidebar === 'details' && 'Meeting details'}
                 {activeSidebar === 'telemetry' && 'AI Engagement & Telemetry'}
@@ -1296,20 +1042,7 @@ export const LiveMeeting: React.FC = () => {
             {isVideoOff ? <VideoOff className="h-5 w-5" /> : <Video className="h-5 w-5" />}
           </button>
 
-          {/* 3. Live Captions [CC] Toggle */}
-          <button
-            onClick={() => setCaptionsEnabled(!captionsEnabled)}
-            className={`h-12 w-12 rounded-full flex items-center justify-center transition-all shadow-md cursor-pointer ${
-              captionsEnabled
-                ? 'bg-[#8ab4f8] text-[#202124] hover:bg-[#aecbfa]'
-                : 'bg-[#3c4043] text-white hover:bg-[#43474b]'
-            }`}
-            title={captionsEnabled ? 'Turn off captions (c)' : 'Turn on captions (c)'}
-          >
-            <Subtitles className="h-5 w-5" />
-          </button>
-
-          {/* 4. Raise Hand Button */}
+          {/* 3. Raise Hand Button */}
           <button
             onClick={handleHandRaise}
             className={`h-12 w-12 rounded-full flex items-center justify-center transition-all shadow-md cursor-pointer ${
@@ -1322,7 +1055,7 @@ export const LiveMeeting: React.FC = () => {
             <Hand className="h-5 w-5" />
           </button>
 
-          {/* 5. Screen Share Button */}
+          {/* 4. Screen Share Button */}
           <button
             onClick={toggleScreenShare}
             className={`h-12 w-12 rounded-full flex items-center justify-center transition-all shadow-md cursor-pointer ${
@@ -1335,7 +1068,7 @@ export const LiveMeeting: React.FC = () => {
             <ScreenShare className="h-5 w-5" />
           </button>
 
-          {/* 6. More Options Button */}
+          {/* 5. More Options Button */}
           <div className="relative">
             <button
               onClick={() => setShowMoreMenu(!showMoreMenu)}
@@ -1347,15 +1080,6 @@ export const LiveMeeting: React.FC = () => {
 
             {showMoreMenu && (
               <div className="absolute bottom-14 left-1/2 -translate-x-1/2 w-48 bg-[#282a2d] border border-[#3c4043] rounded-xl shadow-2xl p-1.5 space-y-1 z-50 text-xs animate-fadeIn">
-                <button
-                  onClick={() => {
-                    setCaptionSize(captionSize === 'normal' ? 'large' : 'normal');
-                    setShowMoreMenu(false);
-                  }}
-                  className="w-full text-left px-3 py-2 text-slate-200 hover:bg-[#3c4043] rounded-lg transition-colors cursor-pointer"
-                >
-                  Captions font: {captionSize === 'normal' ? 'Normal' : 'Large'}
-                </button>
                 <button
                   onClick={() => {
                     toggleFullscreen();

@@ -245,15 +245,7 @@ async def meeting_live_ws(
             "your_user_id": user_id,
         }))
 
-        # 2. Send live caption history to newly connected participant
-        history = active_live_transcripts.get(id, [])
-        if history:
-            await websocket.send_text(json.dumps({
-                "type": "history",
-                "captions": history
-            }))
-
-        # 3. Broadcast join event to everyone else
+        # 2. Broadcast join event to everyone else
         await manager.broadcast_to_meeting(id, {
             "type": "participant_joined",
             "user_id": user_id,
@@ -269,30 +261,21 @@ async def meeting_live_ws(
                 msg = json.loads(data_text)
                 msg_type = msg.get("type")
 
-                if msg_type == "caption":
-                    # Enrich caption with authenticated speaker info and assigned color
-                    caption_payload = {
-                        "type": "caption",
+                if msg_type in ["chat_message", "chat"]:
+                    chat_payload = {
+                        "type": "chat_message",
                         "speaker": user_name,
                         "user_id": user_id,
                         "color": user_color,
                         "text": msg.get("text", "").strip(),
-                        "is_final": bool(msg.get("is_final", False)),
                         "timestamp": msg.get("timestamp", datetime.utcnow().strftime("%H:%M:%S")),
                     }
-                    # Save final captions to meeting live buffer with AI punctuation & cleanup
-                    if caption_payload["is_final"] and caption_payload["text"]:
-                        try:
-                            caption_payload["text"] = ai_client.clean_live_caption(caption_payload["text"])
-                        except Exception as e:
-                            logger.debug(f"Live caption polish notice: {e}")
+                    if chat_payload["text"]:
+                        await manager.broadcast_to_meeting(id, chat_payload)
 
-                        if id not in active_live_transcripts:
-                            active_live_transcripts[id] = []
-                        active_live_transcripts[id].append(caption_payload)
-
-                    # Broadcast to all connected participants in this meeting room
-                    await manager.broadcast_to_meeting(id, caption_payload)
+                elif msg_type == "caption":
+                    # Live captions are disabled
+                    pass
 
                 elif msg_type == "hand_raise":
                     # Broadcast hand-raise state to all participants
@@ -358,8 +341,8 @@ def get_live_captions(
     db: Session = Depends(get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ) -> Any:
-    """Retrieve in-memory live caption segments collected during ongoing session."""
-    return active_live_transcripts.get(id, [])
+    """Live captions are disabled; returns empty list."""
+    return []
 
 
 @router.post("/{id}/catchup")
@@ -480,8 +463,8 @@ def end_meeting(
     db.commit()
     db.refresh(meeting)
 
-    # 3. Collect live captions buffer and clear from memory
-    live_caps = active_live_transcripts.pop(meeting.id, [])
+    # 3. Live captions are disabled; no buffer to collect
+    live_caps = []
 
     # 4. Prepare audio path
     wav_filename = f"meeting_{meeting.id}.wav"
