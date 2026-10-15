@@ -196,88 +196,98 @@ class MeetingProcessingPipeline:
             telemetry["transcription_provider"] = stt_provider
             telemetry["transcription_model"] = getattr(settings, "GROQ_TRANSCRIPTION_MODEL", "whisper-large-v3-turbo")
 
-            # Fall back to live captions buffer if STT returned no segments
-            if (not raw_segments or len(raw_segments) == 0) and live_caps:
-                logger.info(f"[Pipeline #{meeting_id}] Falling back to live captions buffer ({len(live_caps)} items).")
-                raw_segments = [
-                    {
-                        "speaker": c.get("speaker", "Participant 1"),
-                        "speaker_name": c.get("speaker", "Participant 1"),
-                        "text": c.get("text", ""),
-                        "start": float(i * 4.0),
-                        "end": float((i + 1) * 4.0),
-                        "confidence": 0.9,
-                    }
-                    for i, c in enumerate(live_caps) if c.get("text")
-                ]
+            # ── Check for actual speech detection ─────────────────────────
+            valid_raw_segments = [
+                s for s in (raw_segments or [])
+                if s.get("text", "").strip() and s.get("text", "").strip() not in [".", "..", "...", "!", "?", "♪", "[music]"]
+            ]
+            has_speech = len(valid_raw_segments) > 0 and bool(full_text and full_text.strip())
 
-            # ── Stage 3: Speaker Diarization (55%) ────────────────────────
-            self._update_status(meeting_id, "DIARIZING", 55, "Detecting distinct speakers via AssemblyAI...")
-            logger.info("[DIARIZATION] AssemblyAI started")
-            t_diarize_start = time.time()
+            if not has_speech:
+                logger.info(f"[Pipeline #{meeting_id}] No speech detected in recording. Bypassing diarization, alignment, and AI summarization.")
+                speaker_intervals = []
+                diarize_provider = "none"
+                effective_expected_speakers = 0
+                raw_spk_labels = []
+                detected_speakers = set()
+                aligned_segments = []
+                cleaned_segments = []
+                raw_transcript_text = ""
+                cleaned_transcript_text = ""
+                telemetry["diarization_duration"] = 0.0
+                telemetry["diarization_provider"] = "none"
+                telemetry["diarization_segments_count"] = 0
+                telemetry["alignment_duration"] = 0.0
+                telemetry["cleaning_duration"] = 0.0
+            else:
+                raw_segments = valid_raw_segments
+                # ── Stage 3: Speaker Diarization (55%) ────────────────────────
+                self._update_status(meeting_id, "DIARIZING", 55, "Detecting speakers and timeline intervals...")
+                logger.info("[DIARIZATION] Speaker diarization started")
+                t_diarize_start = time.time()
 
-            # Calculate expected speakers accurately:
-            # 1. Use user-specified expected_speakers if given (>= 2)
-            # 2. Or use count of genuine participant names if >= 2
-            # 3. Otherwise None (let AssemblyAI detect without forcing)
-            effective_expected_speakers = expected_speakers
-            if effective_expected_speakers is None and participant_names:
-                genuine_participants = [
-                    p for p in participant_names
-                    if not (p.strip().lower().startswith("participant") or p.strip().lower().startswith("speaker") or p.strip().lower() == "unknown speaker")
-                ]
-                if len(genuine_participants) >= 2:
-                    effective_expected_speakers = len(genuine_participants)
+                # Calculate expected speakers accurately:
+                # 1. Use user-specified expected_speakers if given (>= 2)
+                # 2. Or use count of genuine participant names if >= 2
+                # 3. Otherwise None (let AssemblyAI detect without forcing)
+                effective_expected_speakers = expected_speakers
+                if effective_expected_speakers is None and participant_names:
+                    genuine_participants = [
+                        p for p in participant_names
+                        if not (p.strip().lower().startswith("participant") or p.strip().lower().startswith("speaker") or p.strip().lower() == "unknown speaker")
+                    ]
+                    if len(genuine_participants) >= 2:
+                        effective_expected_speakers = len(genuine_participants)
 
-            speaker_intervals, diarize_provider = self.diarization_service.diarize(
-                audio_path=prepared_audio_path,
-                expected_speakers=effective_expected_speakers,
-                participant_names=participant_names,
-            )
-            t_diarize_end = time.time()
-            logger.info(f"[DIARIZATION] AssemblyAI completed in {t_diarize_end - t_diarize_start:.2f}s")
-            raw_spk_labels = sorted(list(set(str(i.get("speaker", "A")) for i in speaker_intervals if i.get("speaker"))))
-            telemetry["diarization_start"] = t_diarize_start
-            telemetry["diarization_end"] = t_diarize_end
-            telemetry["diarization_duration"] = round(t_diarize_end - t_diarize_start, 2)
-            telemetry["diarization_provider"] = diarize_provider
-            telemetry["diarization_segments_count"] = len(speaker_intervals)
+                speaker_intervals, diarize_provider = self.diarization_service.diarize(
+                    audio_path=prepared_audio_path,
+                    expected_speakers=effective_expected_speakers,
+                    participant_names=participant_names,
+                )
+                t_diarize_end = time.time()
+                logger.info(f"[DIARIZATION] AssemblyAI completed in {t_diarize_end - t_diarize_start:.2f}s")
+                raw_spk_labels = sorted(list(set(str(i.get("speaker", "A")) for i in speaker_intervals if i.get("speaker"))))
+                telemetry["diarization_start"] = t_diarize_start
+                telemetry["diarization_end"] = t_diarize_end
+                telemetry["diarization_duration"] = round(t_diarize_end - t_diarize_start, 2)
+                telemetry["diarization_provider"] = diarize_provider
+                telemetry["diarization_segments_count"] = len(speaker_intervals)
 
-            # ── Stage 4: Transcript Alignment (70%) ───────────────────────
-            self._update_status(meeting_id, "ALIGNING", 70, "Aligning transcript segments with speakers...")
-            logger.info(f"[ALIGNMENT] Diarization intervals: {len(speaker_intervals)}")
-            t_align_start = time.time()
-            aligned_segments = self.alignment_service.align(
-                transcript_segments=raw_segments,
-                speaker_intervals=speaker_intervals,
-                participant_names=participant_names,
-            )
-            telemetry["alignment_duration"] = round(time.time() - t_align_start, 2)
-            raw_transcript_text = TranscriptCleanupService.format_transcript_text(aligned_segments, use_cleaned=False)
+                # ── Stage 4: Transcript Alignment (70%) ───────────────────────
+                self._update_status(meeting_id, "ALIGNING", 70, "Aligning transcript segments with speakers...")
+                logger.info(f"[ALIGNMENT] Diarization intervals: {len(speaker_intervals)}")
+                t_align_start = time.time()
+                aligned_segments = self.alignment_service.align(
+                    transcript_segments=raw_segments,
+                    speaker_intervals=speaker_intervals,
+                    participant_names=participant_names,
+                )
+                telemetry["alignment_duration"] = round(time.time() - t_align_start, 2)
+                raw_transcript_text = TranscriptCleanupService.format_transcript_text(aligned_segments, use_cleaned=False)
 
-            # Auto-register newly detected genuine human speakers (do not register generic 'Participant 1', 'Participant 2')
-            detected_speakers = set(seg.get("speaker_name") for seg in aligned_segments if seg.get("speaker_name"))
-            existing_names = {p.name.lower() for p in meeting.participants}
-            if meeting.host:
-                existing_names.add((meeting.host.full_name or "").lower())
-            for spk in detected_speakers:
-                if spk:
-                    spk_clean = spk.strip().lower()
-                    if (
-                        spk_clean not in existing_names
-                        and not spk_clean.startswith("participant")
-                        and not spk_clean.startswith("speaker")
-                        and spk_clean != "unknown speaker"
-                    ):
-                        new_p = Participant(meeting_id=meeting.id, name=spk)
-                        db.add(new_p)
+                # Auto-register newly detected genuine human speakers (do not register generic 'Participant 1', 'Participant 2')
+                detected_speakers = set(seg.get("speaker_name") for seg in aligned_segments if seg.get("speaker_name"))
+                existing_names = {p.name.lower() for p in meeting.participants}
+                if meeting.host:
+                    existing_names.add((meeting.host.full_name or "").lower())
+                for spk in detected_speakers:
+                    if spk:
+                        spk_clean = spk.strip().lower()
+                        if (
+                            spk_clean not in existing_names
+                            and not spk_clean.startswith("participant")
+                            and not spk_clean.startswith("speaker")
+                            and spk_clean != "unknown speaker"
+                        ):
+                            new_p = Participant(meeting_id=meeting.id, name=spk)
+                            db.add(new_p)
 
-            # ── Stage 5: Light Transcript Cleanup (80%) ───────────────────
-            self._update_status(meeting_id, "CLEANING", 80, "Applying light punctuation formatting and term normalization...")
-            t_clean_start = time.time()
-            cleaned_segments = self.cleanup_service.clean_segments(aligned_segments)
-            cleaned_transcript_text = TranscriptCleanupService.format_transcript_text(cleaned_segments, use_cleaned=True)
-            telemetry["cleaning_duration"] = round(time.time() - t_clean_start, 2)
+                # ── Stage 5: Light Transcript Cleanup (80%) ───────────────────
+                self._update_status(meeting_id, "CLEANING", 80, "Applying light punctuation formatting and term normalization...")
+                t_clean_start = time.time()
+                cleaned_segments = self.cleanup_service.clean_segments(aligned_segments)
+                cleaned_transcript_text = TranscriptCleanupService.format_transcript_text(cleaned_segments, use_cleaned=True)
+                telemetry["cleaning_duration"] = round(time.time() - t_clean_start, 2)
 
             suspicious_segments = sum(1 for seg in cleaned_segments if seg.get("quality_flags"))
             telemetry["suspicious_segments_count"] = suspicious_segments
@@ -317,10 +327,17 @@ class MeetingProcessingPipeline:
             }
             telemetry["diagnostics"] = diagnostics_payload
 
+            final_transcript_text = (cleaned_transcript_text or raw_transcript_text or "").strip()
+            if not final_transcript_text or not has_speech:
+                final_transcript_text = "No speech detected. Please record again."
+                cleaned_segments = []
+                cleaned_transcript_text = ""
+                raw_transcript_text = ""
+
             # Save raw and cleaned transcript in Database
             existing_transcript = db.query(Transcript).filter(Transcript.meeting_id == meeting.id).first()
             if existing_transcript:
-                existing_transcript.full_text = cleaned_transcript_text or raw_transcript_text or "No speech recorded."
+                existing_transcript.full_text = final_transcript_text
                 existing_transcript.raw_transcript = raw_transcript_text
                 existing_transcript.cleaned_transcript = cleaned_transcript_text
                 existing_transcript.raw_segments = cleaned_segments
@@ -328,7 +345,7 @@ class MeetingProcessingPipeline:
             else:
                 db_transcript = Transcript(
                     meeting_id=meeting.id,
-                    full_text=cleaned_transcript_text or raw_transcript_text or "No speech recorded.",
+                    full_text=final_transcript_text,
                     raw_transcript=raw_transcript_text,
                     cleaned_transcript=cleaned_transcript_text,
                     raw_segments=cleaned_segments,
@@ -341,37 +358,47 @@ class MeetingProcessingPipeline:
             logger.info(f"[API] Unique speakers returned: {len(detected_speakers)}")
 
             # ── Stage 6: AI Summarization & Intelligence (90%) ────────────
-            self._update_status(meeting_id, "ANALYZING", 90, "Synthesizing executive summary and action items...")
-            logger.info("[SUMMARY] Generating intelligence from cleaned transcript")
-            t_sum_start = time.time()
-            intelligence, summary_provider = self.summary_service.generate_intelligence(
-                transcript=cleaned_transcript_text or raw_transcript_text,
-                participant_names=participant_names,
-            )
-            t_sum_end = time.time()
-            logger.info(f"[SUMMARY] {summary_provider.capitalize()} completed in {t_sum_end - t_sum_start:.2f}s")
-            telemetry["summary_start"] = t_sum_start
-            telemetry["summary_end"] = t_sum_end
-            telemetry["summary_duration"] = round(t_sum_end - t_sum_start, 2)
-            telemetry["summary_provider"] = summary_provider
+            if has_speech and final_transcript_text != "No speech detected. Please record again.":
+                self._update_status(meeting_id, "ANALYZING", 90, "Synthesizing executive summary and action items...")
+                logger.info("[SUMMARY] Generating intelligence from cleaned transcript")
+                t_sum_start = time.time()
+                intelligence, summary_provider = self.summary_service.generate_intelligence(
+                    transcript=final_transcript_text,
+                    participant_names=participant_names,
+                )
+                t_sum_end = time.time()
+                logger.info(f"[SUMMARY] {summary_provider.capitalize()} completed in {t_sum_end - t_sum_start:.2f}s")
+                telemetry["summary_start"] = t_sum_start
+                telemetry["summary_end"] = t_sum_end
+                telemetry["summary_duration"] = round(t_sum_end - t_sum_start, 2)
+                telemetry["summary_provider"] = summary_provider
 
-            # Update meeting title if current title is generic or auto-generated
-            smart_title = intelligence.get("title")
-            generic_titles = [
-                "Active Meeting Session", "Google Meet Session", "New Meeting",
-                "Untitled Meeting", "Scheduled Meeting", "Design & Architecture Review"
-            ]
-            if smart_title and (meeting.title in generic_titles or meeting.title.startswith("Meeting #")):
-                meeting.title = smart_title
+                # Update meeting title if current title is generic or auto-generated
+                smart_title = intelligence.get("title")
+                generic_titles = [
+                    "Active Meeting Session", "Google Meet Session", "New Meeting",
+                    "Untitled Meeting", "Scheduled Meeting", "Design & Architecture Review"
+                ]
+                if smart_title and (meeting.title in generic_titles or meeting.title.startswith("Meeting #")):
+                    meeting.title = smart_title
+
+                key_points_str = "\n".join(f"- {kp}" for kp in intelligence.get("key_points", []))
+                decisions_str = "\n".join(f"{i+1}. {d}" for i, d in enumerate(intelligence.get("decisions", [])))
+                risks_str = "\n".join(f"- {r}" for r in intelligence.get("risks", []))
+                next_steps_str = "\n".join(f"- {ns}" for ns in intelligence.get("next_steps", []))
+                action_items_json = intelligence.get("action_items", [])
+            else:
+                logger.info(f"[Pipeline #{meeting_id}] Silence / no speech detected; skipping AI summarization.")
+                telemetry["summary_duration"] = 0.0
+                telemetry["summary_provider"] = "none"
+                key_points_str = "No speech detected. Please record again."
+                decisions_str = ""
+                risks_str = ""
+                next_steps_str = ""
+                action_items_json = []
 
             # Save Summary in Database
             existing_summary = db.query(Summary).filter(Summary.meeting_id == meeting.id).first()
-            key_points_str = "\n".join(f"- {kp}" for kp in intelligence.get("key_points", []))
-            decisions_str = "\n".join(f"{i+1}. {d}" for i, d in enumerate(intelligence.get("decisions", [])))
-            risks_str = "\n".join(f"- {r}" for r in intelligence.get("risks", []))
-            next_steps_str = "\n".join(f"- {ns}" for ns in intelligence.get("next_steps", []))
-            action_items_json = intelligence.get("action_items", [])
-
             if existing_summary:
                 existing_summary.key_points = key_points_str
                 existing_summary.decisions = decisions_str

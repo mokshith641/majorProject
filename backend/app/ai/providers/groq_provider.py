@@ -2,7 +2,10 @@ import logging
 import os
 import time
 from typing import Any, Dict, List, Optional, Tuple
-from groq import Groq
+try:
+    from groq import Groq
+except ImportError:
+    Groq = None
 
 from app.core.config import settings
 
@@ -48,10 +51,12 @@ class GroqProvider:
         self._client: Optional[Groq] = None
 
     def is_available(self) -> bool:
-        return bool(self.api_key and self.api_key.strip())
+        return bool(Groq is not None and self.api_key and self.api_key.strip())
 
-    def _get_client(self) -> Groq:
+    def _get_client(self) -> Any:
         if self._client is None:
+            if Groq is None:
+                raise ImportError("groq python library is not installed.")
             if not self.is_available():
                 raise ValueError("GROQ_API_KEY is not configured.")
             self._client = Groq(api_key=self.api_key.strip())
