@@ -21,6 +21,97 @@ class LocalProvider:
         self._whisper_model = None
         self._t5_model = None
         self._t5_tokenizer = None
+        self._diarization_pipeline = None
+
+    def _get_diarization_pipeline(self):
+        if self._diarization_pipeline is None:
+            hf_token = getattr(settings, "HF_TOKEN", "") or os.environ.get("HF_TOKEN", "")
+            if not hf_token:
+                logger.warning("[LocalProvider] HF_TOKEN is not configured. Local PyAnnote diarization requires a HuggingFace token.")
+                return None
+            try:
+                from pyannote.audio import Pipeline
+                import torch
+                logger.info("[LocalProvider] Lazily loading PyAnnote speaker diarization pipeline (pyannote/speaker-diarization-3.1)...")
+                pipeline = Pipeline.from_pretrained(
+                    "pyannote/speaker-diarization-3.1",
+                    token=hf_token.strip(),
+                )
+                device = getattr(settings, "WHISPER_DEVICE", "cpu")
+                if device == "cuda" and torch.cuda.is_available():
+                    pipeline.to(torch.device("cuda"))
+                else:
+                    pipeline.to(torch.device("cpu"))
+                self._diarization_pipeline = pipeline
+                logger.info("[LocalProvider] PyAnnote speaker diarization pipeline initialized successfully.")
+            except Exception as e:
+                logger.error(f"[LocalProvider] Failed to load PyAnnote diarization pipeline: {e}")
+                return None
+        return self._diarization_pipeline
+
+    def diarize_audio(
+        self,
+        audio_path: str,
+        num_speakers: Optional[int] = None,
+        min_speakers: Optional[int] = None,
+        max_speakers: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Runs PyAnnote local neural speaker diarization on CPU."""
+        pipeline = self._get_diarization_pipeline()
+        if pipeline is None:
+            logger.info("[LocalProvider] PyAnnote pipeline unavailable; returning default single-speaker fallback.")
+            return [{
+                "speaker": "A",
+                "start": 0.0,
+                "end": 99999.0,
+                "text": "",
+                "confidence": 0.5,
+            }]
+
+        logger.info(f"[LocalProvider] Running local PyAnnote diarization on '{audio_path}'...")
+        start_t = time.time()
+        kwargs = {}
+        if num_speakers and num_speakers >= 1:
+            kwargs["num_speakers"] = int(num_speakers)
+        else:
+            if min_speakers and min_speakers >= 1:
+                kwargs["min_speakers"] = int(min_speakers)
+            if max_speakers and max_speakers >= 1:
+                kwargs["max_speakers"] = int(max_speakers)
+
+        diarization = pipeline(audio_path, **kwargs)
+
+        intervals = []
+        speaker_mapping = {}
+        next_label_idx = 0
+
+        # pyannote outputs tracks with (turn, _, speaker)
+        for turn, _, speaker in diarization.itertracks(yield_label=True):
+            if speaker not in speaker_mapping:
+                # Map raw speaker (e.g. SPEAKER_00) to A, B, C...
+                speaker_mapping[speaker] = chr(65 + next_label_idx) if next_label_idx < 26 else f"S{next_label_idx+1}"
+                next_label_idx += 1
+
+            intervals.append({
+                "speaker": speaker_mapping[speaker],
+                "start": round(turn.start, 2),
+                "end": round(turn.end, 2),
+                "text": "",
+                "confidence": 0.90,
+            })
+
+        duration = time.time() - start_t
+        logger.info(
+            f"[LocalProvider] PyAnnote diarization completed in {duration:.2f}s "
+            f"({len(intervals)} intervals, {len(speaker_mapping)} distinct speakers)."
+        )
+        return intervals if intervals else [{
+            "speaker": "A",
+            "start": 0.0,
+            "end": 99999.0,
+            "text": "",
+            "confidence": 0.5,
+        }]
 
     def _get_whisper_model(self):
         if self._whisper_model is None:

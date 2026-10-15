@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     GEMINI_API_KEY: str = ""
     ASSEMBLYAI_API_KEY: str = ""
+    HF_TOKEN: str = ""
 
     # Groq & Cloud Speech-to-Text Configurations
     GROQ_TRANSCRIPTION_MODEL: str = "whisper-large-v3-turbo"
