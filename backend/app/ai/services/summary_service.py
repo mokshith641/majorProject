@@ -61,10 +61,25 @@ class SummaryService:
         Returns:
             (intelligence_dict, provider_used)
         """
-        if not transcript or not transcript.strip():
+        if (
+            not transcript
+            or not transcript.strip()
+            or transcript.strip() in [
+                "No speech detected. Please record again.",
+                "No speech recorded.",
+                "No transcribable audio or discussion recorded.",
+            ]
+        ):
             empty_data = MeetingIntelligenceSchema(
-                title="Untitled Session",
-                executive_summary="No transcribable audio or discussion recorded.",
+                title=participant_names[0] if participant_names else "Meeting Session",
+                executive_summary="No speech detected. Please record again.",
+                key_points=[],
+                decisions=[],
+                action_items=[],
+                risks=[],
+                questions=[],
+                next_steps=[],
+                topics=[],
             ).dict()
             return empty_data, "none"
 

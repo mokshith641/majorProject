@@ -97,17 +97,26 @@ class LocalProvider:
 
     def summarize_text(self, transcript: str) -> Dict[str, Any]:
         """Runs local heuristic + T5 fallback summarizer."""
-        if not transcript or not transcript.strip():
+        if (
+            not transcript
+            or not transcript.strip()
+            or transcript.strip() in [
+                "No speech detected. Please record again.",
+                "No speech recorded.",
+                "No discussion recorded.",
+                "No transcribable audio or discussion recorded.",
+            ]
+        ):
             return {
                 "title": "Meeting Summary",
-                "executive_summary": "No discussion recorded.",
-                "key_points": ["No key discussion points recorded."],
-                "decisions": ["No formal decisions captured."],
+                "executive_summary": "No speech detected. Please record again.",
+                "key_points": [],
+                "decisions": [],
                 "action_items": [],
-                "risks": ["None identified."],
+                "risks": [],
                 "questions": [],
-                "next_steps": ["No follow-up actions scheduled."],
-                "topics": ["General"],
+                "next_steps": [],
+                "topics": [],
             }
 
         logger.info("[LocalProvider] Running local heuristic summarizer fallback...")
@@ -147,7 +156,33 @@ class LocalProvider:
         if not next_steps:
             next_steps = ["Continue progress on current milestones."]
 
-        exec_summary = " ".join(sentences[:3]) if sentences else "Session concluded successfully."
+        # Use T5 neural summarization for executive summary if text is substantial
+        exec_summary = ""
+        if len(transcript.split()) >= 15:
+            try:
+                import torch
+                t5_model, t5_tokenizer = self._get_t5()
+                inputs = t5_tokenizer.encode(
+                    "summarize: " + transcript[:1500],
+                    return_tensors="pt",
+                    max_length=512,
+                    truncation=True,
+                )
+                with torch.inference_mode():
+                    outputs = t5_model.generate(
+                        inputs,
+                        max_length=120,
+                        min_length=30,
+                        num_beams=2,
+                        length_penalty=1.0,
+                        early_stopping=True,
+                    )
+                exec_summary = t5_tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
+            except Exception as e:
+                logger.warning(f"[LocalProvider] T5 summarization error: {e}. Falling back to heuristic summary.")
+
+        if not exec_summary:
+            exec_summary = " ".join(sentences[:3]) if sentences else "Session concluded successfully."
 
         return {
             "title": "Meeting Sync & Action Review",
